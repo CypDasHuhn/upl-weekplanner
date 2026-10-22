@@ -11,6 +11,10 @@ vi.mock("./stores/planner", async () => {
       selectedId: ref("new"),
       selectedTask: ref({ id: "new", "std.name": "New task" }),
       error: ref(null),
+      loading: ref(false),
+      saving: ref(false),
+      syncError: ref(null),
+      load: vi.fn(),
       document: ref({ id: "week", kind: "container", tasks: [] }),
       nameFocusId: ref(null),
       undo: vi.fn(() => true),
@@ -33,12 +37,12 @@ vi.mock("./stores/planner", async () => {
   };
 });
 
-import App from "./App.vue";
+import PlannerView from "./PlannerView.vue";
 
 let wrapper: VueWrapper | null = null;
 
 function mountApp(): VueWrapper {
-  return mount(App, {
+  return mount(PlannerView, {
     attachTo: document.body,
     global: { stubs: { WeekGrid: true, TaskSidebar: true } },
   });

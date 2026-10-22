@@ -34,16 +34,32 @@ const core = vi.hoisted(() => {
   return { applyMutation: vi.fn(apply), previewMutation: vi.fn(apply), apply };
 });
 
+const server = vi.hoisted(() => ({
+  loadDocumentFromServer: vi.fn(),
+  applyRequestsOnServer: vi.fn(),
+  replaceDocumentOnServer: vi.fn(),
+}));
+
 vi.mock("../core/uniplanner", () => core);
+vi.mock("../core/server", () => ({
+  ...server,
+  DOCUMENT_PATH: "test.upl.json",
+  ServerError: class ServerError extends Error {
+    constructor(
+      message: string,
+      readonly status: number,
+    ) {
+      super(message);
+      this.name = "ServerError";
+    }
+  },
+}));
 
 import { createPlanner } from "./planner";
 
-const DOCUMENT_KEY = "upl-weekplanner.document.v1";
-const LANE_ORDER_KEY = "upl-weekplanner.lane-order.v1";
-
-function storeDocument(): void {
+function planDocument(): UplDocument {
   const week = startOfWeek(new Date());
-  const document: UplDocument = {
+  return {
     id: "week",
     kind: "container",
     tasks: [
@@ -61,24 +77,23 @@ function storeDocument(): void {
       },
     ],
   };
-  localStorage.setItem(DOCUMENT_KEY, JSON.stringify(document));
-  localStorage.setItem(LANE_ORDER_KEY, JSON.stringify(["a", "b"]));
 }
 
 beforeEach(() => {
   core.applyMutation.mockImplementation(core.apply);
   core.previewMutation.mockImplementation(core.apply);
-  localStorage.clear();
-  storeDocument();
+  server.loadDocumentFromServer.mockResolvedValue(planDocument());
+  server.applyRequestsOnServer.mockImplementation(async () => planDocument());
+  server.replaceDocumentOnServer.mockImplementation(async (document: UplDocument) => document);
 });
 
 afterEach(() => {
-  localStorage.clear();
+  vi.clearAllMocks();
 });
 
 describe("planner undo", () => {
   it("undoes and redoes field mutations", () => {
-    const planner = createPlanner();
+    const planner = createPlanner(planDocument());
 
     expect(planner.renameTask("a", "Renamed")).toBe(true);
     expect(planner.tasks.value.find((task) => task.id === "a")?.["std.name"]).toBe("Renamed");
@@ -91,7 +106,7 @@ describe("planner undo", () => {
   });
 
   it("restores a deleted task on undo", () => {
-    const planner = createPlanner();
+    const planner = createPlanner(planDocument());
 
     planner.deleteTask("a");
     expect(planner.tasks.value.some((task) => task.id === "a")).toBe(false);
@@ -104,7 +119,7 @@ describe("planner undo", () => {
   });
 
   it("removes a created task on undo and recreates it on redo", () => {
-    const planner = createPlanner();
+    const planner = createPlanner(planDocument());
     const id = planner.createTask(0, 9 * 60);
 
     expect(id).not.toBeNull();
@@ -120,7 +135,7 @@ describe("planner undo", () => {
 
 describe("planner lane order", () => {
   it("keeps lane sides stable while a task crosses another", () => {
-    const planner = createPlanner();
+    const planner = createPlanner(planDocument());
     const laneOf = (taskId: string) => planner.blocks.value.find((block) => block.taskId === taskId)?.lane;
 
     expect(laneOf("a")).toBe(0);
@@ -136,5 +151,30 @@ describe("planner lane order", () => {
 
     expect(laneOf("a")).toBe(0);
     expect(laneOf("b")).toBe(1);
+  });
+});
+
+describe("planner server sync", () => {
+  it("loads the document from the server", async () => {
+    const planner = createPlanner();
+
+    await expect(planner.load()).resolves.toBe(true);
+
+    expect(planner.document.value.id).toBe("week");
+    expect(planner.tasks.value.map((task) => task.id)).toEqual(["a", "b"]);
+  });
+
+  it("sends local mutations to the server", async () => {
+    const planner = createPlanner(planDocument());
+
+    expect(planner.renameTask("a", "Renamed")).toBe(true);
+
+    await vi.waitFor(() => expect(server.applyRequestsOnServer).toHaveBeenCalled());
+    expect(server.applyRequestsOnServer).toHaveBeenCalledWith([
+      expect.objectContaining({
+        requester: "gantt",
+        mutations: [{ field: "std.name", value: "Renamed", target: "a" }],
+      }),
+    ]);
   });
 });

@@ -1,4 +1,5 @@
 import { computed, ref } from "vue";
+import { applyRequestsOnServer, loadDocumentFromServer, replaceDocumentOnServer, ServerError } from "../core/server";
 import { applyMutation, previewMutation } from "../core/uniplanner";
 import { planEdge, type EdgeChange, type EdgeMode, type PlanEdge } from "../core/edges";
 import { buildHistoryEntry, type AppliedRequest, type HistoryEntry } from "../core/history";
@@ -14,22 +15,27 @@ import {
   startOfWeek,
   type PlanBlock,
 } from "../core/time";
+import { session } from "./session";
 import type { UplDocument, UplMutation, UplRequest, UplResult, UplTask } from "../core/types";
 
-const STORAGE_KEY = "upl-weekplanner.document.v1";
-const LANE_ORDER_KEY = "upl-weekplanner.lane-order.v1";
 const REQUESTER = "gantt";
 
-export function createPlanner() {
+export function createPlanner(initial: UplDocument = emptyDocument()) {
   const weekStart = ref(startOfWeek(new Date()));
-  const documentState = ref<UplDocument>(loadDocument(weekStart.value));
-  const laneOrder = ref<string[]>(loadLaneOrder(documentState.value));
+  const documentState = ref<UplDocument>(initial);
+  const laneOrder = ref<string[]>(documentLaneOrder(initial));
   const undoStack = ref<HistoryEntry[]>([]);
   const redoStack = ref<HistoryEntry[]>([]);
   const preview = ref<UplDocument | null>(null);
   const error = ref<string | null>(null);
+  const loading = ref(false);
+  const saving = ref(false);
+  const syncError = ref<string | null>(null);
   const selectedId = ref<string | null>(null);
   const nameFocusId = ref<string | null>(null);
+
+  let syncQueue: Promise<void> = Promise.resolve();
+  let pendingSync = 0;
 
   const activeDocument = computed(() => preview.value ?? documentState.value);
   const blocks = computed(() => readBlocks(activeDocument.value, weekStart.value, laneOrder.value));
@@ -40,20 +46,20 @@ export function createPlanner() {
     return { requester: REQUESTER, mutations, createTasks, removeTasks };
   }
 
-  function commit(result: UplResult): boolean {
+  function commit(result: UplResult, requests: UplRequest[] = []): boolean {
     if (!result.ok) {
       preview.value = null;
       error.value = result.reason;
       return false;
     }
-    return commitDocument(result.document);
+    return commitDocument(result.document, requests);
   }
 
-  function commitDocument(document: UplDocument): boolean {
+  function commitDocument(document: UplDocument, requests: UplRequest[] = []): boolean {
     documentState.value = document;
     preview.value = null;
     error.value = null;
-    persist(document);
+    if (requests.length > 0) enqueueSync(() => applyRequestsOnServer(requests));
     return true;
   }
 
@@ -64,7 +70,7 @@ export function createPlanner() {
       const result = applyMutation(before, historyRequest);
       if (!result.ok) return commit(result);
       const entry = buildHistoryEntry([{ before, request: historyRequest, result }]);
-      const committed = commit(result);
+      const committed = commit(result, [historyRequest]);
       if (committed) recordHistory(entry);
       return committed;
     } catch (caught) {
@@ -93,8 +99,75 @@ export function createPlanner() {
 
   function fail(caught: unknown): false {
     preview.value = null;
-    error.value = caught instanceof Error ? caught.message : String(caught);
+    error.value = message(caught);
     return false;
+  }
+
+  async function load(): Promise<boolean> {
+    loading.value = true;
+    syncError.value = null;
+
+    try {
+      const document = await loadDocumentFromServer();
+      if (document.kind !== "container") {
+        error.value = "Server document is not a container";
+        return false;
+      }
+      hydrate(document);
+      return true;
+    } catch (caught) {
+      if (caught instanceof ServerError && caught.status === 401) {
+        session.expire();
+        return false;
+      }
+      error.value = message(caught);
+      return false;
+    } finally {
+      loading.value = false;
+    }
+  }
+
+  function hydrate(document: UplDocument): void {
+    documentState.value = document;
+    laneOrder.value = documentLaneOrder(document);
+    preview.value = null;
+    error.value = null;
+    syncError.value = null;
+    selectedId.value = null;
+    nameFocusId.value = null;
+    undoStack.value = [];
+    redoStack.value = [];
+  }
+
+  function enqueueSync(operation: () => Promise<unknown>): void {
+    pendingSync += 1;
+    saving.value = true;
+    syncQueue = syncQueue
+      .then(async () => {
+        try {
+          await operation();
+          syncError.value = null;
+        } catch (caught) {
+          syncFailure(caught);
+        }
+      })
+      .finally(() => {
+        pendingSync -= 1;
+        saving.value = pendingSync > 0;
+      });
+  }
+
+  function syncFailure(caught: unknown): void {
+    if (caught instanceof ServerError && caught.status === 401) {
+      syncError.value = caught.message;
+      session.expire();
+      return;
+    }
+    syncError.value = message(caught);
+  }
+
+  function message(caught: unknown): string {
+    return caught instanceof Error ? caught.message : String(caught);
   }
 
   function recordHistory(entry: HistoryEntry | null): void {
@@ -116,7 +189,7 @@ export function createPlanner() {
       document = result.document;
     }
 
-    if (!commitDocument(document)) return false;
+    if (!commitDocument(document, requests)) return false;
     if (selectedId.value && !(document.tasks ?? []).some((task) => task.id === selectedId.value)) {
       selectedId.value = null;
       nameFocusId.value = null;
@@ -148,7 +221,6 @@ export function createPlanner() {
 
   function setLaneOrder(document: UplDocument): void {
     laneOrder.value = documentLaneOrder(document);
-    persistLaneOrder();
   }
 
   function insertLaneOrder(taskId: string, dayIndex: number, startMinutes: number): void {
@@ -159,11 +231,6 @@ export function createPlanner() {
     const index = later ? order.indexOf(later.taskId) : -1;
     order.splice(index === -1 ? order.length : index, 0, taskId);
     laneOrder.value = order;
-    persistLaneOrder();
-  }
-
-  function persistLaneOrder(): void {
-    storage()?.setItem(LANE_ORDER_KEY, JSON.stringify(laneOrder.value));
   }
 
   function createTask(dayIndex: number, startMinutes: number, durationMinutes = 60): string | null {
@@ -241,15 +308,17 @@ export function createPlanner() {
     try {
       let document = documentState.value;
       const applied: AppliedRequest[] = [];
+      const requests: UplRequest[] = [];
       for (const edgeRequest of edgeRequests(changes, edge.dayIndex)) {
         if (edgeRequest.mutations.length === 0) continue;
         const before = document;
         const result = applyMutation(document, edgeRequest);
         if (!result.ok) return commit(result);
         applied.push({ before, request: edgeRequest, result });
+        requests.push(edgeRequest);
         document = result.document;
       }
-      const committed = commitDocument(document);
+      const committed = commitDocument(document, requests);
       if (committed) recordHistory(buildHistoryEntry(applied));
       return committed;
     } catch (caught) {
@@ -327,9 +396,10 @@ export function createPlanner() {
         error.value = "Import a container document";
         return false;
       }
-      const committed = commit(result);
+      const committed = commitDocument(result.document);
       if (committed) {
-        setLaneOrder(documentState.value);
+        enqueueSync(() => replaceDocumentOnServer(result.document));
+        setLaneOrder(result.document);
         undoStack.value = [];
         redoStack.value = [];
       }
@@ -343,6 +413,10 @@ export function createPlanner() {
     document: documentState,
     weekStart,
     error,
+    loading,
+    saving,
+    syncError,
+    load,
     blocks,
     tasks,
     selectedId,
@@ -369,42 +443,6 @@ export function createPlanner() {
 
 export const planner = createPlanner();
 
-function loadDocument(weekStart: Date): UplDocument {
-  const raw = storage()?.getItem(STORAGE_KEY);
-  if (raw) {
-    try {
-      const parsed = JSON.parse(raw) as UplDocument;
-      const result = applyMutation(parsed, { requester: REQUESTER, mutations: [] });
-      if (result.ok && result.document.kind === "container") return result.document;
-    } catch {
-      storage()?.removeItem(STORAGE_KEY);
-    }
-  }
-  return seedDocument(weekStart);
-}
-
-function persist(document: UplDocument): void {
-  storage()?.setItem(STORAGE_KEY, JSON.stringify(document));
-}
-
-function loadLaneOrder(document: UplDocument): string[] {
-  const ids = new Set((document.tasks ?? []).map((task) => task.id));
-  const raw = storage()?.getItem(LANE_ORDER_KEY);
-  let stored: string[] = [];
-  if (raw) {
-    try {
-      const parsed: unknown = JSON.parse(raw);
-      if (Array.isArray(parsed)) {
-        stored = [...new Set(parsed.filter((id): id is string => typeof id === "string" && ids.has(id)))];
-      }
-    } catch {
-      storage()?.removeItem(LANE_ORDER_KEY);
-    }
-  }
-  const known = new Set(stored);
-  return [...stored, ...documentLaneOrder(document).filter((id) => !known.has(id))];
-}
-
 function documentLaneOrder(document: UplDocument): string[] {
   return (document.tasks ?? [])
     .map((task, index) => ({ id: task.id, index, start: taskStart(task) }))
@@ -422,31 +460,12 @@ function taskStart(task: UplTask): number {
   return Number.isNaN(start) ? Number.POSITIVE_INFINITY : start;
 }
 
-function storage(): Storage | null {
-  return typeof localStorage === "undefined" ? null : localStorage;
-}
-
-function seedDocument(weekStart: Date): UplDocument {
+function emptyDocument(): UplDocument {
   return {
-    id: taskId(),
+    id: "loading",
     kind: "container",
     "std.name": "Week plan",
-    tasks: [
-      {
-        id: taskId(),
-        "std.name": "Deep work",
-        "std.time.start": instantFor(weekStart, 0, 9 * 60).toISOString(),
-        "std.time.duration": "PT2H",
-        "std.status.closed": false,
-      },
-      {
-        id: taskId(),
-        "std.name": "Review",
-        "std.time.start": instantFor(weekStart, 1, 14 * 60).toISOString(),
-        "std.time.duration": "PT1H",
-        "std.status.closed": false,
-      },
-    ],
+    tasks: [],
   };
 }
 
