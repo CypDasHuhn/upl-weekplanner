@@ -1,3 +1,4 @@
+import { readTags } from "./tags.ts";
 import type { UplDocument } from "./types";
 
 export const MINUTES_PER_HOUR = 60;
@@ -13,6 +14,7 @@ export interface PlanBlock {
   dayIndex: number;
   startMinutes: number;
   durationMinutes: number;
+  tags: string[];
   lane: number;
   laneCount: number;
 }
@@ -120,6 +122,7 @@ export function readBlocks(document: UplDocument, weekStart: Date, laneOrder: re
       dayIndex,
       startMinutes,
       durationMinutes: clampedDuration,
+      tags: readTags(task),
       lane: 0,
       laneCount: 1,
     });

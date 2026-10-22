@@ -1,7 +1,15 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
   color-scheme: light;
+  --grid-line: #e2e8f0;
+}
+
+:root.dark {
+  color-scheme: dark;
+  --grid-line: #334155;
 }
 
 html,
@@ -12,4 +20,11 @@ body,
 
 body {
   margin: 0;
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+.dark body {
+  background: #020617;
+  color: #f1f5f9;
 }

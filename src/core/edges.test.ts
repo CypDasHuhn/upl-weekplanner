@@ -15,6 +15,7 @@ function block(
     dayIndex: 0,
     startMinutes,
     durationMinutes,
+    tags: [],
     lane: 0,
     laneCount: 1,
     ...overrides,

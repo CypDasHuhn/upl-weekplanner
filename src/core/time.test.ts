@@ -14,7 +14,17 @@ import {
 } from "./time";
 
 function block(taskId: string, startMinutes: number, durationMinutes: number): PlanBlock {
-  return { taskId, title: taskId, closed: false, dayIndex: 0, startMinutes, durationMinutes, lane: 0, laneCount: 1 };
+  return {
+    taskId,
+    title: taskId,
+    closed: false,
+    dayIndex: 0,
+    startMinutes,
+    durationMinutes,
+    tags: [],
+    lane: 0,
+    laneCount: 1,
+  };
 }
 
 describe("iso durations", () => {

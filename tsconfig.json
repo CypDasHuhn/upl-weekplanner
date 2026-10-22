@@ -9,9 +9,10 @@
     "isolatedModules": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
+    "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
     "jsx": "preserve",
-    "types": ["vite/client"]
+    "types": ["node", "vite/client"]
   },
-  "include": ["src/**/*.ts", "src/**/*.d.ts", "src/**/*.vue", "vite.config.ts"]
+  "include": ["src/**/*.ts", "src/**/*.d.ts", "src/**/*.vue", "scripts/**/*.ts", "vite.config.ts"]
 }

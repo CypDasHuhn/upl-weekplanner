@@ -6,10 +6,16 @@ import WeekGrid from "./WeekGrid.vue";
 
 const planner = vi.hoisted(() => ({
   weekStart: { value: new Date(2026, 3, 1) },
+  selectedIds: { value: [] as string[] },
   select: vi.fn(),
+  addToSelection: vi.fn(),
+  selectMany: vi.fn(),
+  focusSelection: vi.fn(),
   createTask: vi.fn(() => "new-task"),
   previewMove: vi.fn(() => true),
   moveTask: vi.fn(),
+  previewMoveTasks: vi.fn(() => true),
+  moveTasks: vi.fn(),
   previewEdge: vi.fn(() => true),
   applyEdge: vi.fn(),
   clearPreview: vi.fn(),
@@ -19,7 +25,15 @@ vi.mock("../stores/planner", () => ({ planner }));
 
 beforeEach(() => {
   vi.clearAllMocks();
+  planner.selectedIds.value = [];
+  planner.select.mockImplementation((taskId: string | null) => {
+    planner.selectedIds.value = taskId ? [taskId] : [];
+  });
+  planner.addToSelection.mockImplementation((taskId: string) => {
+    if (!planner.selectedIds.value.includes(taskId)) planner.selectedIds.value = [...planner.selectedIds.value, taskId];
+  });
   planner.previewMove.mockReturnValue(true);
+  planner.previewMoveTasks.mockReturnValue(true);
   planner.previewEdge.mockReturnValue(true);
 });
 
@@ -37,16 +51,18 @@ function planBlock(overrides: Partial<PlanBlock> = {}): PlanBlock {
     dayIndex: 0,
     startMinutes: 9 * 60,
     durationMinutes: 120,
+    tags: [],
     lane: 0,
     laneCount: 1,
     ...overrides,
   };
 }
 
-function mountGrid(blocks: PlanBlock[] = [planBlock()]): VueWrapper {
+function mountGrid(blocks: PlanBlock[] = [planBlock()], selectedIds: string[] = []): VueWrapper {
+  planner.selectedIds.value = [...selectedIds];
   return mount(WeekGrid, {
     attachTo: document.body,
-    props: { blocks, selectedId: null },
+    props: { blocks, selectedId: null, selectedIds },
   });
 }
 
@@ -65,8 +81,8 @@ function pointerDown(element: Element, clientY: number, init: MouseEventInit = {
   );
 }
 
-function pointerMove(clientY: number): void {
-  window.dispatchEvent(new MouseEvent("pointermove", { clientY, clientX: 20, bubbles: true }));
+function pointerMove(clientY: number, clientX = 20): void {
+  window.dispatchEvent(new MouseEvent("pointermove", { clientY, clientX, bubbles: true }));
 }
 
 function pointerUp(): void {
@@ -129,8 +145,80 @@ describe("week grid interactions", () => {
     pointerUp();
 
     expect(planner.select).toHaveBeenCalledWith("a");
-    expect(planner.previewMove).toHaveBeenCalledWith("a", 2, 10 * 60);
-    expect(planner.moveTask).toHaveBeenCalledWith("a", 2, 10 * 60);
+    expect(planner.previewMoveTasks).toHaveBeenCalledWith([{ taskId: "a", dayIndex: 2, startMinutes: 10 * 60 }]);
+    expect(planner.moveTasks).toHaveBeenCalledWith([{ taskId: "a", dayIndex: 2, startMinutes: 10 * 60 }]);
+  });
+
+  it("moves the whole selection together", async () => {
+    const wrapper = mountGrid(
+      [planBlock(), planBlock({ taskId: "b", title: "Beta", dayIndex: 1, startMinutes: 10 * 60 })],
+      ["a", "b"],
+    );
+    const block = wrapper.get("[title^='Alpha']");
+
+    pointerDown(block.element, 100);
+    await nextTick();
+    stubColumnAt(wrapper, 2);
+    pointerMove(100 + HOUR_PX);
+    pointerUp();
+
+    expect(planner.focusSelection).toHaveBeenCalledWith("a");
+    expect(planner.select).not.toHaveBeenCalled();
+    expect(planner.previewMoveTasks).toHaveBeenCalledWith([
+      { taskId: "a", dayIndex: 2, startMinutes: 10 * 60 },
+      { taskId: "b", dayIndex: 3, startMinutes: 11 * 60 },
+    ]);
+    expect(planner.moveTasks).toHaveBeenCalledWith([
+      { taskId: "a", dayIndex: 2, startMinutes: 10 * 60 },
+      { taskId: "b", dayIndex: 3, startMinutes: 11 * 60 },
+    ]);
+  });
+
+  it("selects a task on plain click and expands on Ctrl click", () => {
+    const wrapper = mountGrid();
+    const block = wrapper.get("[title^='Alpha']").element;
+
+    pointerDown(block, 100);
+    pointerDown(block, 100, { ctrlKey: true });
+
+    expect(planner.select).toHaveBeenCalledWith("a");
+    expect(planner.addToSelection).toHaveBeenCalledWith("a");
+  });
+
+  it("clears the selection when starting a plain marquee", async () => {
+    const wrapper = mountGrid();
+
+    pointerDown(wrapper.get("[data-day-index='0']").element, 10, { clientX: 10 });
+
+    expect(planner.selectMany).toHaveBeenCalledWith([], false);
+  });
+
+  it("selects intersecting tasks with a marquee", async () => {
+    const wrapper = mountGrid();
+    const block = wrapper.get("[title^='Alpha']").element;
+    Object.defineProperty(block, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({ left: 0, top: 0, right: 100, bottom: 100 }),
+    });
+
+    pointerDown(wrapper.get("[data-day-index='0']").element, 10, { clientX: 10 });
+    pointerMove(120, 120);
+
+    expect(planner.selectMany).toHaveBeenLastCalledWith(["a"], false);
+  });
+
+  it("adds marquee hits to the existing selection with Ctrl", async () => {
+    const wrapper = mountGrid();
+    const block = wrapper.get("[title^='Alpha']").element;
+    Object.defineProperty(block, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({ left: 0, top: 0, right: 100, bottom: 100 }),
+    });
+
+    pointerDown(wrapper.get("[data-day-index='0']").element, 10, { clientX: 10, ctrlKey: true });
+    pointerMove(120, 120);
+
+    expect(planner.selectMany).toHaveBeenLastCalledWith(["a"], true);
   });
 
   it("pushes a shared edge with no modifier", async () => {

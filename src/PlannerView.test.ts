@@ -9,7 +9,9 @@ vi.mock("./stores/planner", async () => {
       weekStart: ref(new Date(2026, 3, 6)),
       blocks: ref([]),
       selectedId: ref("new"),
+      selectedIds: ref(["new"]),
       selectedTask: ref({ id: "new", "std.name": "New task" }),
+      tasks: ref([]),
       error: ref(null),
       loading: ref(false),
       saving: ref(false),
@@ -23,13 +25,22 @@ vi.mock("./stores/planner", async () => {
       importDocument: vi.fn(),
       clearNameFocus: vi.fn(),
       select: vi.fn(),
+      addToSelection: vi.fn(),
+      selectMany: vi.fn(),
+      focusSelection: vi.fn(),
+      copySelection: vi.fn(),
+      cutSelection: vi.fn(),
+      pasteClipboard: vi.fn(),
       createTask: vi.fn(),
       previewMove: vi.fn(),
       moveTask: vi.fn(),
+      previewMoveTasks: vi.fn(),
+      moveTasks: vi.fn(),
       previewEdge: vi.fn(),
       applyEdge: vi.fn(),
       renameTask: vi.fn(),
       setClosed: vi.fn(),
+      setTags: vi.fn(),
       clearPreview: vi.fn(),
       shiftWeek: vi.fn(),
       goToday: vi.fn(),
@@ -62,6 +73,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(planner.undo).mockReturnValue(true);
   vi.mocked(planner.redo).mockReturnValue(true);
+  vi.mocked(planner.copySelection).mockReturnValue(true);
+  vi.mocked(planner.cutSelection).mockReturnValue(true);
+  vi.mocked(planner.pasteClipboard).mockReturnValue(true);
   wrapper = mountApp();
 });
 
@@ -69,6 +83,36 @@ afterEach(() => {
   wrapper?.unmount();
   wrapper = null;
   document.body.innerHTML = "";
+});
+
+function press(key: string, init: KeyboardEventInit = {}): KeyboardEvent {
+  const event = new KeyboardEvent("keydown", { key, ctrlKey: true, bubbles: true, cancelable: true, ...init });
+  window.dispatchEvent(event);
+  return event;
+}
+
+describe("app keyboard clipboard", () => {
+  it("copies, cuts and pastes selections", () => {
+    expect(press("c").defaultPrevented).toBe(true);
+    expect(press("x").defaultPrevented).toBe(true);
+    expect(press("v").defaultPrevented).toBe(true);
+
+    expect(planner.copySelection).toHaveBeenCalledOnce();
+    expect(planner.cutSelection).toHaveBeenCalledOnce();
+    expect(planner.pasteClipboard).toHaveBeenCalledOnce();
+  });
+
+  it("leaves native clipboard shortcuts alone while editing", () => {
+    const input = document.createElement("input");
+    document.body.appendChild(input);
+    input.focus();
+    const event = new KeyboardEvent("keydown", { key: "c", ctrlKey: true, bubbles: true, cancelable: true });
+
+    input.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(planner.copySelection).not.toHaveBeenCalled();
+  });
 });
 
 describe("app keyboard history", () => {

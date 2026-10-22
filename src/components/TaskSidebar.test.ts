@@ -15,6 +15,7 @@ vi.mock("../stores/planner", async () => {
       nameFocusId: ref<string | null>(null),
       renameTask: vi.fn(),
       setClosed: vi.fn(),
+      setTags: vi.fn(),
       deleteTask: vi.fn(),
       select: vi.fn(),
       clearNameFocus: vi.fn(),
@@ -62,5 +63,20 @@ describe("task sidebar", () => {
     const input = wrapper.get("input[type='text']");
     expect(document.activeElement).toBe(input.element);
     expect(mocked.clearNameFocus).toHaveBeenCalledTimes(1);
+  });
+
+  it("commits tags for the selected task", async () => {
+    const wrapper = mount(TaskSidebar, { attachTo: document.body });
+
+    mocked.selectedTask.value = { id: "a", "std.name": "New task", "std.tags": ["work"] };
+    mocked.selectedId.value = "a";
+    await nextTick();
+
+    const tags = wrapper.findAll("input[type='text']")[1];
+    if (!tags) throw new Error("missing tags input");
+    await tags.setValue("work, urgent");
+    await tags.trigger("change");
+
+    expect(planner.setTags).toHaveBeenCalledWith("a", ["work", "urgent"]);
   });
 });

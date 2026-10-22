@@ -1,29 +1,40 @@
 import { computed, ref } from "vue";
 import { applyRequestsOnServer, loadDocumentFromServer, replaceDocumentOnServer, ServerError } from "../core/server";
+import { normalizeTags } from "../core/tags";
 import { applyMutation, previewMutation } from "../core/uniplanner";
 import { planEdge, type EdgeChange, type EdgeMode, type PlanEdge } from "../core/edges";
 import { buildHistoryEntry, type AppliedRequest, type HistoryEntry } from "../core/history";
 import {
   addDays,
   clamp,
+  dayIndexFor,
   formatIsoDuration,
   instantFor,
   MIN_DURATION_MINUTES,
   MINUTES_PER_DAY,
+  minutesIntoDay,
   readBlocks,
   snap,
   startOfWeek,
   type PlanBlock,
 } from "../core/time";
+import { emptyWeekDocument, weekDocumentPath } from "../core/week";
 import { session } from "./session";
 import type { UplDocument, UplMutation, UplRequest, UplResult, UplTask } from "../core/types";
 
 const REQUESTER = "gantt";
 
-export function createPlanner(initial: UplDocument = emptyDocument()) {
-  const weekStart = ref(startOfWeek(new Date()));
-  const documentState = ref<UplDocument>(initial);
-  const laneOrder = ref<string[]>(documentLaneOrder(initial));
+export interface TaskMove {
+  taskId: string;
+  dayIndex: number;
+  startMinutes: number;
+}
+
+export function createPlanner(initial?: UplDocument) {
+  const initialStart = startOfWeek(new Date());
+  const weekStart = ref(initialStart);
+  const documentState = ref<UplDocument>(initial ?? emptyWeekDocument(initialStart));
+  const laneOrder = ref<string[]>(documentLaneOrder(documentState.value));
   const undoStack = ref<HistoryEntry[]>([]);
   const redoStack = ref<HistoryEntry[]>([]);
   const preview = ref<UplDocument | null>(null);
@@ -32,10 +43,17 @@ export function createPlanner(initial: UplDocument = emptyDocument()) {
   const saving = ref(false);
   const syncError = ref<string | null>(null);
   const selectedId = ref<string | null>(null);
+  const selectedIds = ref<string[]>([]);
   const nameFocusId = ref<string | null>(null);
 
   let syncQueue: Promise<void> = Promise.resolve();
   let pendingSync = 0;
+  let navigationStart = initialStart;
+  let documentPath = weekDocumentPath(initialStart);
+  let missingDocument = false;
+  let loadGeneration = 0;
+  let clipboard: UplTask[] = [];
+  const pendingCreates = new Map<string, UplDocument>();
 
   const activeDocument = computed(() => preview.value ?? documentState.value);
   const blocks = computed(() => readBlocks(activeDocument.value, weekStart.value, laneOrder.value));
@@ -59,7 +77,13 @@ export function createPlanner(initial: UplDocument = emptyDocument()) {
     documentState.value = document;
     preview.value = null;
     error.value = null;
-    if (requests.length > 0) enqueueSync(() => applyRequestsOnServer(requests));
+    if (requests.length > 0) {
+      const path = documentPath;
+      if (missingDocument && !pendingCreates.has(path)) {
+        pendingCreates.set(path, emptyWeekDocument(weekStart.value));
+      }
+      enqueueSync(path, () => applyRequestsOnServer(path, requests));
+    }
     return true;
   }
 
@@ -103,48 +127,69 @@ export function createPlanner(initial: UplDocument = emptyDocument()) {
     return false;
   }
 
-  async function load(): Promise<boolean> {
+  async function load(start: Date = weekStart.value): Promise<boolean> {
+    const target = startOfWeek(start);
+    const path = weekDocumentPath(target);
+    const generation = ++loadGeneration;
     loading.value = true;
     syncError.value = null;
 
     try {
-      const document = await loadDocumentFromServer();
+      const document = await loadDocumentFromServer(path);
+      if (generation !== loadGeneration) return false;
       if (document.kind !== "container") {
         error.value = "Server document is not a container";
         return false;
       }
-      hydrate(document);
+      weekStart.value = target;
+      hydrate(document, path, false);
       return true;
     } catch (caught) {
+      if (generation !== loadGeneration) return false;
       if (caught instanceof ServerError && caught.status === 401) {
         session.expire();
         return false;
       }
+      if (caught instanceof ServerError && caught.status === 404) {
+        weekStart.value = target;
+        hydrate(emptyWeekDocument(target), path, true);
+        return true;
+      }
       error.value = message(caught);
       return false;
     } finally {
-      loading.value = false;
+      if (generation === loadGeneration) loading.value = false;
     }
   }
 
-  function hydrate(document: UplDocument): void {
+  function hydrate(document: UplDocument, path: string, missing: boolean): void {
+    navigationStart = weekStart.value;
+    documentPath = path;
+    missingDocument = missing;
     documentState.value = document;
     laneOrder.value = documentLaneOrder(document);
     preview.value = null;
     error.value = null;
     syncError.value = null;
     selectedId.value = null;
+    selectedIds.value = [];
     nameFocusId.value = null;
     undoStack.value = [];
     redoStack.value = [];
   }
 
-  function enqueueSync(operation: () => Promise<unknown>): void {
+  function enqueueSync(path: string, operation: () => Promise<unknown>): void {
     pendingSync += 1;
     saving.value = true;
     syncQueue = syncQueue
       .then(async () => {
         try {
+          const create = pendingCreates.get(path);
+          if (create) {
+            await replaceDocumentOnServer(path, create);
+            pendingCreates.delete(path);
+            if (documentPath === path) missingDocument = false;
+          }
           await operation();
           syncError.value = null;
         } catch (caught) {
@@ -190,8 +235,10 @@ export function createPlanner(initial: UplDocument = emptyDocument()) {
     }
 
     if (!commitDocument(document, requests)) return false;
-    if (selectedId.value && !(document.tasks ?? []).some((task) => task.id === selectedId.value)) {
-      selectedId.value = null;
+    const taskIds = new Set((document.tasks ?? []).map((task) => task.id));
+    selectedIds.value = selectedIds.value.filter((id) => taskIds.has(id));
+    if (selectedId.value && !taskIds.has(selectedId.value)) {
+      selectedId.value = selectedIds.value.at(-1) ?? null;
       nameFocusId.value = null;
     }
     return true;
@@ -246,23 +293,86 @@ export function createPlanner(initial: UplDocument = emptyDocument()) {
     };
     if (!run([], [task])) return null;
     insertLaneOrder(id, dayIndex, start);
-    selectedId.value = id;
+    select(id);
     nameFocusId.value = id;
     return id;
   }
 
   function previewMove(taskId: string, dayIndex: number, startMinutes: number): boolean {
-    const start = snap(startMinutes);
-    return previewRun([
-      { field: "std.time.start", value: instantFor(weekStart.value, dayIndex, start).toISOString(), target: taskId },
-    ]);
+    return previewMoveTasks([{ taskId, dayIndex, startMinutes }]);
   }
 
   function moveTask(taskId: string, dayIndex: number, startMinutes: number): boolean {
-    const start = snap(startMinutes);
-    return run([
-      { field: "std.time.start", value: instantFor(weekStart.value, dayIndex, start).toISOString(), target: taskId },
-    ]);
+    return moveTasks([{ taskId, dayIndex, startMinutes }]);
+  }
+
+  function previewMoveTasks(moves: TaskMove[]): boolean {
+    return previewRun(moveMutations(moves));
+  }
+
+  function moveTasks(moves: TaskMove[]): boolean {
+    return run(moveMutations(moves));
+  }
+
+  function moveMutations(moves: TaskMove[]): UplMutation[] {
+    return moves.map((move) => ({
+      field: "std.time.start",
+      value: instantFor(weekStart.value, move.dayIndex, snap(move.startMinutes)).toISOString(),
+      target: move.taskId,
+    }));
+  }
+
+  function copySelection(): boolean {
+    const tasks = selectionTasks();
+    if (tasks.length === 0) return false;
+    clipboard = tasks.map(cloneTask);
+    return true;
+  }
+
+  function cutSelection(): boolean {
+    const taskIds = [...selectedIds.value];
+    if (!copySelection()) return false;
+    if (!run([], undefined, taskIds)) return false;
+    select(null);
+    return true;
+  }
+
+  function pasteClipboard(): boolean {
+    const created: UplTask[] = [];
+    for (const task of clipboard) {
+      const start = clipboardStart(task);
+      if (!start) continue;
+      const dayIndex = dayIndexFor(start, startOfWeek(start));
+      if (dayIndex < 0) continue;
+      const { id: _id, "std.time.end": _end, ...fields } = task;
+      created.push({
+        ...fields,
+        id: taskId(),
+        "std.time.start": instantFor(weekStart.value, dayIndex, snap(minutesIntoDay(start))).toISOString(),
+      });
+    }
+    if (created.length === 0) return false;
+    if (!run([], created)) return false;
+    selectMany(
+      created.map((task) => task.id),
+      false,
+    );
+    return true;
+  }
+
+  function clipboardStart(task: UplTask): Date | null {
+    const value = task["std.time.start"];
+    if (typeof value !== "string") return null;
+    const start = new Date(value);
+    return Number.isNaN(start.getTime()) ? null : start;
+  }
+
+  function selectionTasks(): UplTask[] {
+    const tasks = documentState.value.tasks ?? [];
+    return selectedIds.value.flatMap((id) => {
+      const task = tasks.find((candidate) => candidate.id === id);
+      return task ? [task] : [];
+    });
   }
 
   function previewEdge(edge: PlanEdge, mode: EdgeMode, delta: number, laneBlocks: PlanBlock[]): boolean {
@@ -358,14 +468,38 @@ export function createPlanner(initial: UplDocument = emptyDocument()) {
     return run([{ field: "std.status.closed", value: closed, target: taskId }]);
   }
 
+  function setTags(taskId: string, tags: string[]): boolean {
+    const normalized = normalizeTags(tags);
+    return run([{ field: "std.tags", value: normalized.length > 0 ? normalized : null, target: taskId }]);
+  }
+
   function deleteTask(taskId: string): boolean {
     const removed = run([], undefined, [taskId]);
-    if (removed && selectedId.value === taskId) selectedId.value = null;
-    return removed;
+    if (!removed) return false;
+    selectedIds.value = selectedIds.value.filter((id) => id !== taskId);
+    if (selectedId.value === taskId) selectedId.value = selectedIds.value.at(-1) ?? null;
+    return true;
   }
 
   function select(taskId: string | null): void {
     selectedId.value = taskId;
+    selectedIds.value = taskId ? [taskId] : [];
+  }
+
+  function addToSelection(taskId: string): void {
+    if (!selectedIds.value.includes(taskId)) selectedIds.value = [...selectedIds.value, taskId];
+    selectedId.value = taskId;
+  }
+
+  function selectMany(taskIds: string[], additive: boolean): void {
+    const next = additive ? [...new Set([...selectedIds.value, ...taskIds])] : [...new Set(taskIds)];
+    selectedIds.value = next;
+    if (selectedId.value && next.includes(selectedId.value)) return;
+    selectedId.value = next[0] ?? null;
+  }
+
+  function focusSelection(taskId: string): void {
+    if (selectedIds.value.includes(taskId)) selectedId.value = taskId;
   }
 
   function clearNameFocus(): void {
@@ -377,11 +511,11 @@ export function createPlanner(initial: UplDocument = emptyDocument()) {
   }
 
   function shiftWeek(weeks: number): void {
-    weekStart.value = addDays(weekStart.value, weeks * 7);
+    void load(addDays(navigationStart, weeks * 7));
   }
 
   function goToday(): void {
-    weekStart.value = startOfWeek(new Date());
+    void load(startOfWeek(new Date()));
   }
 
   function importDocument(text: string): boolean {
@@ -398,8 +532,14 @@ export function createPlanner(initial: UplDocument = emptyDocument()) {
       }
       const committed = commitDocument(result.document);
       if (committed) {
-        enqueueSync(() => replaceDocumentOnServer(result.document));
+        const path = documentPath;
+        if (!pendingCreates.has(path)) missingDocument = false;
+        enqueueSync(path, async () => {
+          await replaceDocumentOnServer(path, result.document);
+          if (documentPath === path) missingDocument = false;
+        });
         setLaneOrder(result.document);
+        select(null);
         undoStack.value = [];
         redoStack.value = [];
       }
@@ -420,19 +560,29 @@ export function createPlanner(initial: UplDocument = emptyDocument()) {
     blocks,
     tasks,
     selectedId,
+    selectedIds,
     selectedTask,
     nameFocusId,
     createTask,
     previewMove,
     moveTask,
+    previewMoveTasks,
+    moveTasks,
     previewEdge,
     applyEdge,
     renameTask,
     setClosed,
+    setTags,
     deleteTask,
     undo,
     redo,
     select,
+    addToSelection,
+    selectMany,
+    focusSelection,
+    copySelection,
+    cutSelection,
+    pasteClipboard,
     clearNameFocus,
     clearPreview,
     shiftWeek,
@@ -460,16 +610,11 @@ function taskStart(task: UplTask): number {
   return Number.isNaN(start) ? Number.POSITIVE_INFINITY : start;
 }
 
-function emptyDocument(): UplDocument {
-  return {
-    id: "loading",
-    kind: "container",
-    "std.name": "Week plan",
-    tasks: [],
-  };
-}
-
 function taskId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
   return `task-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function cloneTask(task: UplTask): UplTask {
+  return JSON.parse(JSON.stringify(task)) as UplTask;
 }

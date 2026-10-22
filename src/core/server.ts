@@ -1,7 +1,5 @@
 import type { UplDocument, UplRequest } from "./types";
 
-export const DOCUMENT_PATH = "01-personal/planner/2026-W43.upl.json";
-
 export class ServerError extends Error {
   constructor(
     message: string,
@@ -12,16 +10,23 @@ export class ServerError extends Error {
   }
 }
 
-export async function loadDocumentFromServer(): Promise<UplDocument> {
-  const response = await request(`/api/document?path=${encodeURIComponent(DOCUMENT_PATH)}`);
+export async function loadDocumentFromServer(path: string): Promise<UplDocument> {
+  const response = await request(`/api/document?path=${encodeURIComponent(path)}`);
   return (await response.json()) as UplDocument;
 }
 
-export async function applyRequestsOnServer(requests: UplRequest[]): Promise<UplDocument> {
+export async function loadTagsFromServer(path: string): Promise<string[]> {
+  const response = await request(`/api/tags?path=${encodeURIComponent(path)}`);
+  const body = (await response.json()) as { tags?: unknown };
+  if (!Array.isArray(body.tags)) return [];
+  return body.tags.filter((tag): tag is string => typeof tag === "string");
+}
+
+export async function applyRequestsOnServer(path: string, requests: UplRequest[]): Promise<UplDocument> {
   let document: UplDocument | null = null;
 
   for (const requestBody of requests) {
-    const response = await request(`/api/mutation?path=${encodeURIComponent(DOCUMENT_PATH)}`, {
+    const response = await request(`/api/mutation?path=${encodeURIComponent(path)}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(requestBody),
@@ -34,8 +39,8 @@ export async function applyRequestsOnServer(requests: UplRequest[]): Promise<Upl
   return document;
 }
 
-export async function replaceDocumentOnServer(document: UplDocument): Promise<UplDocument> {
-  const response = await request(`/api/document?path=${encodeURIComponent(DOCUMENT_PATH)}`, {
+export async function replaceDocumentOnServer(path: string, document: UplDocument): Promise<UplDocument> {
+  const response = await request(`/api/document?path=${encodeURIComponent(path)}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(document),

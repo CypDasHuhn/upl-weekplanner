@@ -9,6 +9,7 @@
     "dev": "vite",
     "prebuild": "npm run sync-core",
     "build": "vue-tsc --noEmit && vite build",
+    "import:day-planner": "node scripts/import-day-planner.ts",
     "preview": "vite preview",
     "test": "vitest run",
     "typecheck": "vue-tsc --noEmit",
