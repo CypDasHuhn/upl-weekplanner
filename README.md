@@ -17,6 +17,7 @@ containers; every write goes through the compiled UniPlanner Core gatekeeper in 
 | `src/components/` | week grid, task sidebar                                   |
 | `scripts/`        | sync the compiled UniPlanner JS API                       |
 | `.opencode/`      | architect, coder, reviewer, scribe roles                  |
+| `justfile`        | local command recipes                                     |
 
 ## Run
 
@@ -27,6 +28,19 @@ npm run dev
 ```
 
 `sync-core` builds `uniplanner:js-api` and copies `uniplanner-core.js` into `public/`. `dev` and `build` run it first.
+
+## Just
+
+`just` wraps the npm scripts:
+
+```sh
+just install
+just dev
+just check
+just build
+```
+
+`just verify` runs typecheck, tests, format check and the production build. `just clean` removes `dist/` and the copied core bundle.
 
 ## Verify
 

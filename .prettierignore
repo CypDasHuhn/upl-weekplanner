@@ -2,3 +2,4 @@ node_modules
 dist
 public/uniplanner-core.js
 package-lock.json
+justfile
