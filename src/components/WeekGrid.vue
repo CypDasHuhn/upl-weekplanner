@@ -21,13 +21,14 @@ const props = defineProps<{
 const dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const hours = Array.from({ length: 24 }, (_, hour) => hour);
 const palette = ["#dbeafe", "#dcfce7", "#fef3c7", "#fce7f3", "#e0e7ff", "#ccfbf1"];
+const resizeHandleStyle = { height: "clamp(6px, 15%, 20px)" };
 const dragging = ref(false);
 
 const days = computed(() => Array.from({ length: 7 }, (_, index) => addDays(planner.weekStart.value, index)));
 
 interface DragState {
   taskId: string;
-  mode: "move" | "resize";
+  mode: "move" | "resize" | "resize-start";
   startY: number;
   startDay: number;
   startMinutes: number;
@@ -81,7 +82,12 @@ function startResize(event: PointerEvent, block: PlanBlock): void {
   beginDrag(event, block, "resize");
 }
 
-function beginDrag(event: PointerEvent, block: PlanBlock, mode: "move" | "resize"): void {
+function startResizeStart(event: PointerEvent, block: PlanBlock): void {
+  planner.select(block.taskId);
+  beginDrag(event, block, "resize-start");
+}
+
+function beginDrag(event: PointerEvent, block: PlanBlock, mode: "move" | "resize" | "resize-start"): void {
   drag = {
     taskId: block.taskId,
     mode,
@@ -110,6 +116,13 @@ function onPointerMove(event: PointerEvent): void {
     drag.lastDay = dayIndex;
     drag.lastMinutes = start;
     drag.valid = planner.previewMove(drag.taskId, dayIndex, start);
+  } else if (drag.mode === "resize-start") {
+    const end = drag.startMinutes + drag.durationMinutes;
+    const start = clamp(drag.startMinutes + delta, 0, end - MIN_DURATION_MINUTES);
+    const duration = end - start;
+    drag.lastMinutes = start;
+    drag.lastDuration = duration;
+    drag.valid = planner.previewResizeStart(drag.taskId, drag.startDay, start, duration);
   } else {
     const duration = clamp(drag.durationMinutes + delta, MIN_DURATION_MINUTES, MINUTES_PER_DAY - drag.startMinutes);
     drag.lastDuration = duration;
@@ -142,6 +155,8 @@ function onPointerUp(): void {
   }
   if (state.mode === "move") {
     planner.moveTask(state.taskId, state.lastDay, state.lastMinutes);
+  } else if (state.mode === "resize-start") {
+    planner.resizeStart(state.taskId, state.lastDay, state.lastMinutes, state.lastDuration);
   } else {
     planner.resizeTask(state.taskId, state.lastDuration);
   }
@@ -207,7 +222,15 @@ onBeforeUnmount(() => {
               {{ formatClock(block.startMinutes) }}–{{ formatClock(block.startMinutes + block.durationMinutes) }}
             </div>
             <div
-              class="absolute inset-x-0 bottom-0 h-2 cursor-ns-resize bg-slate-900/5"
+              class="absolute inset-x-0 top-0 cursor-ns-resize bg-slate-900/5"
+              data-resize="start"
+              :style="resizeHandleStyle"
+              @pointerdown.stop.prevent="startResizeStart($event, block)"
+            ></div>
+            <div
+              class="absolute inset-x-0 bottom-0 cursor-ns-resize bg-slate-900/5"
+              data-resize="end"
+              :style="resizeHandleStyle"
               @pointerdown.stop.prevent="startResize($event, block)"
             ></div>
           </div>

@@ -17,7 +17,7 @@ One `.upl.json` container holds the week. The container has its own id and field
 
 - Empty space creates a 60-minute task at the snapped pointer position.
 - Body drag moves a task in time and across day columns without changing duration.
-- Bottom-edge drag changes duration.
+- Top-edge drag moves the start and keeps the end fixed; bottom-edge drag changes the duration.
 - Snap and minimum duration are 15 minutes.
 - Lanes are derived per render by interval coloring; overlapping tasks split the non-gutter width.
 - A rejected preview shows the not-allowed cursor and the drag commits nothing.

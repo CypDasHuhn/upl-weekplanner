@@ -13,7 +13,7 @@ Week planner over UniPlanner containers. The grid is a view; all writes go throu
 Scaffolded Vue 3 + TypeScript + Vite app with Tailwind. It renders a Monday-based week, stores a container document in
 localStorage, and commits mutations through the stateless `js-api` build of UniPlanner.
 
-Implemented: create on empty space, move by dragging the body, resize from the bottom edge, rename, close, delete, week
+Implemented: create on empty space, move by dragging the body, resize from either edge, rename, close, delete, week
 navigation, import/export. Times are UTC ISO instants; durations are ISO 8601 strings. Lanes are derived from overlaps.
 
 Next candidates: push/pull/stretch primitives, box and Ctrl selection, multi-block move, undo/redo, backlog of unplaced

@@ -12,6 +12,8 @@ const planner = vi.hoisted(() => ({
   moveTask: vi.fn(),
   previewResize: vi.fn(() => true),
   resizeTask: vi.fn(),
+  previewResizeStart: vi.fn(() => true),
+  resizeStart: vi.fn(),
   clearPreview: vi.fn(),
 }));
 
@@ -21,6 +23,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   planner.previewMove.mockReturnValue(true);
   planner.previewResize.mockReturnValue(true);
+  planner.previewResizeStart.mockReturnValue(true);
 });
 
 enableAutoUnmount(afterEach);
@@ -98,7 +101,7 @@ describe("week grid interactions", () => {
 
   it("resizes from the bottom edge", async () => {
     const wrapper = mountGrid();
-    const handle = wrapper.get("[title^='Alpha']").get(".cursor-ns-resize");
+    const handle = wrapper.get("[title^='Alpha']").get("[data-resize='end']");
 
     pointerDown(handle.element, 100);
     await nextTick();
@@ -107,6 +110,19 @@ describe("week grid interactions", () => {
 
     expect(planner.previewResize).toHaveBeenCalledWith("a", 3 * 60);
     expect(planner.resizeTask).toHaveBeenCalledWith("a", 3 * 60);
+  });
+
+  it("resizes from the top edge", async () => {
+    const wrapper = mountGrid();
+    const handle = wrapper.get("[title^='Alpha']").get("[data-resize='start']");
+
+    pointerDown(handle.element, 100);
+    await nextTick();
+    pointerMove(100 - HOUR_PX);
+    pointerUp();
+
+    expect(planner.previewResizeStart).toHaveBeenCalledWith("a", 0, 8 * 60, 3 * 60);
+    expect(planner.resizeStart).toHaveBeenCalledWith("a", 0, 8 * 60, 3 * 60);
   });
 
   it("aborts when the preview rejects", async () => {

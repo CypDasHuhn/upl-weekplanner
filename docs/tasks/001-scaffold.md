@@ -17,7 +17,7 @@ A running Vue app that reads and writes a UniPlanner container through the compi
 - Stateless JS API adapter (`js-api`: `applyMutation`/`previewMutation`).
 - Time helpers: UTC ISO instants, ISO 8601 durations, local day/minute conversion, 15-minute snap, lane assignment.
 - Planner store: seed document, localStorage, import/export.
-- Week grid: create on empty space, move body, resize bottom edge, derived lanes, 10% gutter.
+- Week grid: create on empty space, move body, resize from either edge, derived lanes, 10% gutter.
 - Task sidebar: rename, close, delete, week task list.
 - Agent role configs on the `opencode` provider.
 
@@ -26,11 +26,12 @@ A running Vue app that reads and writes a UniPlanner container through the compi
 - `npm run typecheck`, `npm test` and `npm run build` are green.
 - Creating, moving and resizing produce one atomic mutation request.
 - Moving across day columns changes only `std.time.start`.
-- Resizing changes only `std.time.duration`.
+- Bottom resize changes only `std.time.duration`.
+- Top resize changes `std.time.start` and `std.time.duration`, keeping the end fixed.
 - Rendering uses local wall time; stored values are UTC.
 - Overlapping blocks split the 90% content width.
 - The week starts Monday and navigation moves seven days.
-- Component tests simulate create, move, resize and rejected-preview interactions.
+- Component tests simulate create, move, top/bottom resize and rejected-preview interactions.
 
 ## Out of scope
 

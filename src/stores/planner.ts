@@ -34,6 +34,7 @@ export function createPlanner() {
 
   function commit(result: UplResult): boolean {
     if (!result.ok) {
+      preview.value = null;
       error.value = result.reason;
       return false;
     }
@@ -54,18 +55,21 @@ export function createPlanner() {
 
   function previewRun(mutations: UplMutation[], createTasks?: UplTask[], removeTasks?: string[]): boolean {
     try {
-      const result = previewMutation(documentState.value, request(mutations, createTasks, removeTasks));
-      if (!result.ok) {
-        preview.value = null;
-        error.value = result.reason;
-        return false;
-      }
-      preview.value = result.document;
-      error.value = null;
-      return true;
+      return previewResult(previewMutation(documentState.value, request(mutations, createTasks, removeTasks)));
     } catch (caught) {
       return fail(caught);
     }
+  }
+
+  function previewResult(result: UplResult): boolean {
+    if (!result.ok) {
+      preview.value = null;
+      error.value = result.reason;
+      return false;
+    }
+    preview.value = result.document;
+    error.value = null;
+    return true;
   }
 
   function fail(caught: unknown): false {
@@ -107,6 +111,51 @@ export function createPlanner() {
 
   function resizeTask(taskId: string, durationMinutes: number): boolean {
     return run([{ field: "std.time.duration", value: formatIsoDuration(durationMinutes), target: taskId }]);
+  }
+
+  function previewResizeStart(
+    taskId: string,
+    dayIndex: number,
+    startMinutes: number,
+    durationMinutes: number,
+  ): boolean {
+    try {
+      const [durationRequest, startRequest] = resizeStartRequests(taskId, dayIndex, startMinutes, durationMinutes);
+      const first = previewMutation(documentState.value, durationRequest);
+      if (!first.ok) return previewResult(first);
+      return previewResult(previewMutation(first.document, startRequest));
+    } catch (caught) {
+      return fail(caught);
+    }
+  }
+
+  function resizeStart(taskId: string, dayIndex: number, startMinutes: number, durationMinutes: number): boolean {
+    try {
+      const [durationRequest, startRequest] = resizeStartRequests(taskId, dayIndex, startMinutes, durationMinutes);
+      const first = applyMutation(documentState.value, durationRequest);
+      if (!first.ok) return commit(first);
+      return commit(applyMutation(first.document, startRequest));
+    } catch (caught) {
+      return fail(caught);
+    }
+  }
+
+  function resizeStartRequests(
+    taskId: string,
+    dayIndex: number,
+    startMinutes: number,
+    durationMinutes: number,
+  ): [UplRequest, UplRequest] {
+    return [
+      request([{ field: "std.time.duration", value: formatIsoDuration(durationMinutes), target: taskId }]),
+      request([
+        {
+          field: "std.time.start",
+          value: instantFor(weekStart.value, dayIndex, startMinutes).toISOString(),
+          target: taskId,
+        },
+      ]),
+    ];
   }
 
   function renameTask(taskId: string, name: string): boolean {
@@ -170,6 +219,8 @@ export function createPlanner() {
     moveTask,
     previewResize,
     resizeTask,
+    previewResizeStart,
+    resizeStart,
     renameTask,
     setClosed,
     deleteTask,
