@@ -72,6 +72,21 @@ describe("lane assignment", () => {
     expect(lanes.map((item) => item.laneCount)).toEqual([1, 1]);
     expect(lanes.map((item) => item.lane)).toEqual([0, 0]);
   });
+
+  it("keeps the established side order when starts cross", () => {
+    const lanes = assignLanes([block("a", 10 * 60, 90), block("b", 9 * 60, 90)], ["a", "b"]);
+    const laneOf = (taskId: string) => lanes.find((item) => item.taskId === taskId)?.lane;
+
+    expect(laneOf("a")).toBe(0);
+    expect(laneOf("b")).toBe(1);
+  });
+
+  it("drops the extra lane once an overlapping task moves away", () => {
+    const lanes = assignLanes([block("a", 12 * 60, 60), block("b", 10 * 60, 60)], ["a", "b"]);
+
+    expect(lanes.map((item) => item.lane)).toEqual([0, 0]);
+    expect(lanes.map((item) => item.laneCount)).toEqual([1, 1]);
+  });
 });
 
 describe("reading blocks", () => {

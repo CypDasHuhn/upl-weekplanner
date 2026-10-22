@@ -97,7 +97,7 @@ export function formatClock(minutes: number): string {
   return `${String(hours).padStart(2, "0")}:${String(mins).padStart(2, "0")}`;
 }
 
-export function readBlocks(document: UplDocument, weekStart: Date): PlanBlock[] {
+export function readBlocks(document: UplDocument, weekStart: Date, laneOrder: readonly string[] = []): PlanBlock[] {
   const blocks: PlanBlock[] = [];
   for (const task of document.tasks ?? []) {
     const startValue = task["std.time.start"];
@@ -124,10 +124,10 @@ export function readBlocks(document: UplDocument, weekStart: Date): PlanBlock[] 
       laneCount: 1,
     });
   }
-  return assignLanes(blocks);
+  return assignLanes(blocks, laneOrder);
 }
 
-export function assignLanes(blocks: PlanBlock[]): PlanBlock[] {
+export function assignLanes(blocks: PlanBlock[], laneOrder: readonly string[] = []): PlanBlock[] {
   const byDay = new Map<number, PlanBlock[]>();
   for (const block of blocks) {
     const day = byDay.get(block.dayIndex);
@@ -135,14 +135,38 @@ export function assignLanes(blocks: PlanBlock[]): PlanBlock[] {
     else byDay.set(block.dayIndex, [block]);
   }
 
+  const rank = new Map(laneOrder.map((taskId, index) => [taskId, index] as const));
   const result: PlanBlock[] = [];
   for (const dayBlocks of byDay.values()) {
-    result.push(...assignDayLanes(dayBlocks));
+    result.push(...assignDayLanes(dayBlocks, rank));
   }
   return result;
 }
 
-function assignDayLanes(blocks: PlanBlock[]): PlanBlock[] {
+function assignDayLanes(blocks: PlanBlock[], rank: Map<string, number>): PlanBlock[] {
+  const visited = new Set<number>();
+  const result: PlanBlock[] = [];
+
+  blocks.forEach((_, index) => {
+    if (visited.has(index)) return;
+    const component: PlanBlock[] = [];
+    const stack = [index];
+    while (stack.length > 0) {
+      const current = stack.pop();
+      if (current === undefined || visited.has(current)) continue;
+      visited.add(current);
+      component.push(blocks[current]);
+      blocks.forEach((other, otherIndex) => {
+        if (!visited.has(otherIndex) && overlaps(blocks[current], other)) stack.push(otherIndex);
+      });
+    }
+    result.push(...assignComponentLanes(component, rank));
+  });
+
+  return result;
+}
+
+function assignComponentLanes(blocks: PlanBlock[], rank: Map<string, number>): PlanBlock[] {
   const sorted = [...blocks].sort(
     (left, right) => left.startMinutes - right.startMinutes || right.durationMinutes - left.durationMinutes,
   );
@@ -157,26 +181,26 @@ function assignDayLanes(blocks: PlanBlock[]): PlanBlock[] {
     return { ...block, lane };
   });
 
-  const visited = new Set<number>();
-  assigned.forEach((_, index) => {
-    if (visited.has(index)) return;
-    const component: number[] = [];
-    const stack = [index];
-    while (stack.length > 0) {
-      const current = stack.pop();
-      if (current === undefined || visited.has(current)) continue;
-      visited.add(current);
-      component.push(current);
-      assigned.forEach((other, otherIndex) => {
-        if (!visited.has(otherIndex) && overlaps(assigned[current], other)) stack.push(otherIndex);
-      });
-    }
-    const laneCount = Math.max(...component.map((item) => assigned[item].lane)) + 1;
-    component.forEach((item) => {
-      assigned[item] = { ...assigned[item], laneCount };
-    });
+  const laneRanks = new Map<number, number>();
+  for (const block of assigned) {
+    const blockRank = rank.get(block.taskId) ?? Number.POSITIVE_INFINITY;
+    const laneRank = laneRanks.get(block.lane);
+    if (laneRank === undefined || blockRank < laneRank) laneRanks.set(block.lane, blockRank);
+  }
+
+  const laneOrder = [...laneRanks.keys()].sort((left, right) => {
+    const leftRank = laneRanks.get(left) ?? Number.POSITIVE_INFINITY;
+    const rightRank = laneRanks.get(right) ?? Number.POSITIVE_INFINITY;
+    if (leftRank !== rightRank) return leftRank - rightRank;
+    return left - right;
   });
-  return assigned;
+  const remap = new Map(laneOrder.map((lane, index) => [lane, index] as const));
+
+  return assigned.map((block) => ({
+    ...block,
+    lane: remap.get(block.lane)!,
+    laneCount: laneOrder.length,
+  }));
 }
 
 function overlaps(left: PlanBlock, right: PlanBlock): boolean {
