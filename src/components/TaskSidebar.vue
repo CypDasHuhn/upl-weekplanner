@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import { formatClock, parseIsoDuration } from "../core/time";
 import { planner } from "../stores/planner";
 
-const { selectedTask, selectedId, blocks } = planner;
+const { selectedTask, selectedId, blocks, nameFocusId } = planner;
 const title = ref("");
+const nameInput = ref<HTMLInputElement | null>(null);
 
 watch(
   selectedTask,
@@ -13,6 +14,15 @@ watch(
   },
   { immediate: true },
 );
+
+watch(nameFocusId, async (taskId) => {
+  if (!taskId) return;
+  await nextTick();
+  if (nameFocusId.value !== taskId) return;
+  nameInput.value?.focus();
+  nameInput.value?.select();
+  planner.clearNameFocus();
+});
 
 const start = computed(() => {
   const value = selectedTask.value?.["std.time.start"];
@@ -64,7 +74,9 @@ function remove(): void {
       <label class="flex flex-col gap-1 text-xs font-medium text-slate-500">
         Name
         <input
+          ref="nameInput"
           v-model="title"
+          data-role="task-name"
           class="rounded-md border border-slate-300 px-2 py-1.5 text-sm text-slate-800 outline-none focus:border-slate-500"
           type="text"
           @change="commitTitle"

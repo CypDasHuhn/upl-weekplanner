@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { buildEdges, type EdgeMode, type PlanEdge } from "../core/edges";
 import {
   addDays,
   clamp,
@@ -21,28 +22,62 @@ const props = defineProps<{
 const dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const hours = Array.from({ length: 24 }, (_, hour) => hour);
 const palette = ["#dbeafe", "#dcfce7", "#fef3c7", "#fce7f3", "#e0e7ff", "#ccfbf1"];
-const resizeHandleStyle = { height: "clamp(6px, 15%, 20px)" };
+const modeLabels: Record<EdgeMode, string> = {
+  push: "Push",
+  pull: "Pull",
+  stretch: "Stretch",
+  overlap: "Overlap",
+};
 const dragging = ref(false);
+const hoveredEdgeId = ref<string | null>(null);
+const shiftHeld = ref(false);
+const ctrlHeld = ref(false);
+const altHeld = ref(false);
+const metaHeld = ref(false);
+const dragMode = ref<EdgeMode | null>(null);
 
 const days = computed(() => Array.from({ length: 7 }, (_, index) => addDays(planner.weekStart.value, index)));
+const edges = computed(() => buildEdges(props.blocks));
+const hoverMode = computed<EdgeMode>(() => {
+  if (altHeld.value) return "overlap";
+  if (ctrlHeld.value || metaHeld.value) return "stretch";
+  if (shiftHeld.value) return "pull";
+  return "push";
+});
+const shownMode = computed<EdgeMode>(() => dragMode.value ?? hoverMode.value);
 
-interface DragState {
+interface MoveDrag {
+  kind: "move";
   taskId: string;
-  mode: "move" | "resize" | "resize-start";
   startY: number;
   startDay: number;
   startMinutes: number;
   durationMinutes: number;
   lastDay: number;
   lastMinutes: number;
-  lastDuration: number;
   valid: boolean;
 }
+
+interface EdgeDrag {
+  kind: "edge";
+  edge: PlanEdge;
+  mode: EdgeMode;
+  laneBlocks: PlanBlock[];
+  startY: number;
+  lastDelta: number;
+  valid: boolean;
+}
+
+type DragState = MoveDrag | EdgeDrag;
 
 let drag: DragState | null = null;
 
 function blocksForDay(dayIndex: number): PlanBlock[] {
   return props.blocks.filter((block) => block.dayIndex === dayIndex);
+}
+
+function edgesForDay(dayIndex: number): PlanEdge[] {
+  return edges.value.filter((edge) => edge.dayIndex === dayIndex);
 }
 
 function blockStyle(block: PlanBlock): Record<string, string> {
@@ -56,6 +91,42 @@ function blockStyle(block: PlanBlock): Record<string, string> {
   };
 }
 
+function edgeStyle(edge: PlanEdge): Record<string, string> {
+  return {
+    top: `${(edge.minutes / MINUTES_PER_HOUR) * HOUR_PX}px`,
+    left: `${edge.left}%`,
+    width: `${edge.width}%`,
+    height: `${edge.height}px`,
+    cursor: modeCursor(shownMode.value),
+  };
+}
+
+function edgeClasses(edge: PlanEdge): Record<string, boolean> {
+  const active = hoveredEdgeId.value === edge.id;
+  return {
+    "bg-slate-900/10": !active,
+    "bg-slate-700/50": active && shownMode.value === "push",
+    "bg-amber-500/60": active && shownMode.value === "pull",
+    "bg-sky-500/60": active && shownMode.value === "stretch",
+    "bg-violet-500/60": active && shownMode.value === "overlap",
+  };
+}
+
+function modeCursor(mode: EdgeMode): string {
+  if (mode === "pull") return "grab";
+  if (mode === "stretch") return "all-scroll";
+  if (mode === "overlap") return "copy";
+  return "ns-resize";
+}
+
+function enterEdge(edge: PlanEdge): void {
+  hoveredEdgeId.value = edge.id;
+}
+
+function leaveEdge(edge: PlanEdge): void {
+  if (hoveredEdgeId.value === edge.id) hoveredEdgeId.value = null;
+}
+
 function columnStyle(): Record<string, string> {
   return {
     height: `${24 * HOUR_PX}px`,
@@ -64,42 +135,54 @@ function columnStyle(): Record<string, string> {
   };
 }
 
-function createAt(event: PointerEvent, dayIndex: number): void {
+function createAt(event: MouseEvent, dayIndex: number): void {
   if (dragging.value) return;
   const element = event.currentTarget as HTMLElement;
   const rect = element.getBoundingClientRect();
   const minutes = ((event.clientY - rect.top) / HOUR_PX) * MINUTES_PER_HOUR;
-  planner.createTask(dayIndex, clamp(minutes, 0, MINUTES_PER_DAY - MIN_DURATION_MINUTES));
+  const start = clamp(snap(minutes), 0, MINUTES_PER_DAY - MIN_DURATION_MINUTES);
+  const occupied = blocksForDay(dayIndex).some(
+    (block) => start >= block.startMinutes && start < block.startMinutes + block.durationMinutes,
+  );
+  if (occupied) return;
+  planner.createTask(dayIndex, start);
 }
 
 function startMove(event: PointerEvent, block: PlanBlock): void {
   planner.select(block.taskId);
-  beginDrag(event, block, "move");
-}
-
-function startResize(event: PointerEvent, block: PlanBlock): void {
-  planner.select(block.taskId);
-  beginDrag(event, block, "resize");
-}
-
-function startResizeStart(event: PointerEvent, block: PlanBlock): void {
-  planner.select(block.taskId);
-  beginDrag(event, block, "resize-start");
-}
-
-function beginDrag(event: PointerEvent, block: PlanBlock, mode: "move" | "resize" | "resize-start"): void {
   drag = {
+    kind: "move",
     taskId: block.taskId,
-    mode,
     startY: event.clientY,
     startDay: block.dayIndex,
     startMinutes: block.startMinutes,
     durationMinutes: block.durationMinutes,
     lastDay: block.dayIndex,
     lastMinutes: block.startMinutes,
-    lastDuration: block.durationMinutes,
     valid: true,
   };
+  beginDrag();
+}
+
+function startEdge(event: PointerEvent, edge: PlanEdge): void {
+  const block = edge.above ?? edge.below;
+  if (!block) return;
+  planner.select(block.taskId);
+  const mode = modeFromEvent(event);
+  drag = {
+    kind: "edge",
+    edge,
+    mode,
+    laneBlocks: props.blocks.filter((item) => item.dayIndex === edge.dayIndex && item.lane === edge.lane),
+    startY: event.clientY,
+    lastDelta: 0,
+    valid: true,
+  };
+  dragMode.value = mode;
+  beginDrag();
+}
+
+function beginDrag(): void {
   dragging.value = true;
   document.body.style.cursor = "grabbing";
   window.addEventListener("pointermove", onPointerMove);
@@ -110,25 +193,18 @@ function onPointerMove(event: PointerEvent): void {
   if (!drag) return;
   const delta = snap(((event.clientY - drag.startY) / HOUR_PX) * MINUTES_PER_HOUR);
 
-  if (drag.mode === "move") {
-    const dayIndex = dayFromEvent(event) ?? drag.startDay;
-    const start = clamp(drag.startMinutes + delta, 0, MINUTES_PER_DAY - drag.durationMinutes);
-    drag.lastDay = dayIndex;
-    drag.lastMinutes = start;
-    drag.valid = planner.previewMove(drag.taskId, dayIndex, start);
-  } else if (drag.mode === "resize-start") {
-    const end = drag.startMinutes + drag.durationMinutes;
-    const start = clamp(drag.startMinutes + delta, 0, end - MIN_DURATION_MINUTES);
-    const duration = end - start;
-    drag.lastMinutes = start;
-    drag.lastDuration = duration;
-    drag.valid = planner.previewResizeStart(drag.taskId, drag.startDay, start, duration);
-  } else {
-    const duration = clamp(drag.durationMinutes + delta, MIN_DURATION_MINUTES, MINUTES_PER_DAY - drag.startMinutes);
-    drag.lastDuration = duration;
-    drag.valid = planner.previewResize(drag.taskId, duration);
+  if (drag.kind === "edge") {
+    drag.lastDelta = delta;
+    drag.valid = planner.previewEdge(drag.edge, drag.mode, delta, drag.laneBlocks);
+    document.body.style.cursor = drag.valid ? "grabbing" : "not-allowed";
+    return;
   }
 
+  const dayIndex = dayFromEvent(event) ?? drag.startDay;
+  const start = clamp(drag.startMinutes + delta, 0, MINUTES_PER_DAY - drag.durationMinutes);
+  drag.lastDay = dayIndex;
+  drag.lastMinutes = start;
+  drag.valid = planner.previewMove(drag.taskId, dayIndex, start);
   document.body.style.cursor = drag.valid ? "grabbing" : "not-allowed";
 }
 
@@ -144,28 +220,59 @@ function onPointerUp(): void {
   if (!drag) return;
   const state = drag;
   drag = null;
-  dragging.value = false;
-  document.body.style.cursor = "";
-  window.removeEventListener("pointermove", onPointerMove);
-  window.removeEventListener("pointerup", onPointerUp);
+  finishDrag();
 
   if (!state.valid) {
     planner.clearPreview();
     return;
   }
-  if (state.mode === "move") {
+  if (state.kind === "move") {
     planner.moveTask(state.taskId, state.lastDay, state.lastMinutes);
-  } else if (state.mode === "resize-start") {
-    planner.resizeStart(state.taskId, state.lastDay, state.lastMinutes, state.lastDuration);
-  } else {
-    planner.resizeTask(state.taskId, state.lastDuration);
+    return;
   }
+  planner.applyEdge(state.edge, state.mode, state.lastDelta, state.laneBlocks);
 }
 
-onBeforeUnmount(() => {
+function finishDrag(): void {
+  dragging.value = false;
+  dragMode.value = null;
+  document.body.style.cursor = "";
   window.removeEventListener("pointermove", onPointerMove);
   window.removeEventListener("pointerup", onPointerUp);
-  document.body.style.cursor = "";
+}
+
+function modeFromEvent(event: PointerEvent): EdgeMode {
+  if (event.altKey) return "overlap";
+  if (event.ctrlKey || event.metaKey) return "stretch";
+  if (event.shiftKey) return "pull";
+  return "push";
+}
+
+function syncModifiers(event: KeyboardEvent): void {
+  shiftHeld.value = event.shiftKey;
+  ctrlHeld.value = event.ctrlKey;
+  altHeld.value = event.altKey;
+  metaHeld.value = event.metaKey;
+}
+
+function resetModifiers(): void {
+  shiftHeld.value = false;
+  ctrlHeld.value = false;
+  altHeld.value = false;
+  metaHeld.value = false;
+}
+
+onMounted(() => {
+  window.addEventListener("keydown", syncModifiers);
+  window.addEventListener("keyup", syncModifiers);
+  window.addEventListener("blur", resetModifiers);
+});
+
+onBeforeUnmount(() => {
+  finishDrag();
+  window.removeEventListener("keydown", syncModifiers);
+  window.removeEventListener("keyup", syncModifiers);
+  window.removeEventListener("blur", resetModifiers);
 });
 </script>
 
@@ -201,7 +308,7 @@ onBeforeUnmount(() => {
           class="relative bg-white"
           :data-day-index="dayIndex"
           :style="columnStyle()"
-          @pointerdown="createAt($event, dayIndex)"
+          @dblclick.self="createAt($event, dayIndex)"
         >
           <div
             v-for="block in blocksForDay(dayIndex)"
@@ -221,18 +328,27 @@ onBeforeUnmount(() => {
             <div class="truncate text-[10px] tabular-nums text-slate-500">
               {{ formatClock(block.startMinutes) }}–{{ formatClock(block.startMinutes + block.durationMinutes) }}
             </div>
-            <div
-              class="absolute inset-x-0 top-0 cursor-ns-resize bg-slate-900/5"
-              data-resize="start"
-              :style="resizeHandleStyle"
-              @pointerdown.stop.prevent="startResizeStart($event, block)"
-            ></div>
-            <div
-              class="absolute inset-x-0 bottom-0 cursor-ns-resize bg-slate-900/5"
-              data-resize="end"
-              :style="resizeHandleStyle"
-              @pointerdown.stop.prevent="startResize($event, block)"
-            ></div>
+          </div>
+
+          <div
+            v-for="edge in edgesForDay(dayIndex)"
+            :key="edge.id"
+            class="absolute z-20 -translate-y-1/2 rounded-full transition-colors"
+            :class="edgeClasses(edge)"
+            :style="edgeStyle(edge)"
+            :data-edge-minutes="edge.minutes"
+            :data-edge-lane="edge.lane"
+            :title="`${modeLabels[shownMode]} · ${formatClock(edge.minutes)}`"
+            @pointerenter="enterEdge(edge)"
+            @pointerleave="leaveEdge(edge)"
+            @pointerdown.stop.prevent="startEdge($event, edge)"
+          >
+            <span
+              v-if="hoveredEdgeId === edge.id"
+              class="pointer-events-none absolute left-1/2 -top-5 -translate-x-1/2 whitespace-nowrap rounded bg-slate-900/80 px-1.5 py-0.5 text-[9px] font-medium leading-none text-white"
+            >
+              {{ modeLabels[shownMode] }}
+            </span>
           </div>
         </div>
       </div>

@@ -35,14 +35,35 @@ async function importFile(event: Event): Promise<void> {
 }
 
 function onKeydown(event: KeyboardEvent): void {
+  const editing = isEditing(event.target);
+  const appHistory = !editing || isPristineTaskName(event.target);
+
+  if ((event.ctrlKey || event.metaKey) && !event.altKey && appHistory) {
+    const key = event.key.toLowerCase();
+    if (key === "z" && !event.shiftKey) {
+      if (planner.undo()) event.preventDefault();
+      return;
+    }
+    if (key === "y" || (key === "z" && event.shiftKey)) {
+      if (planner.redo()) event.preventDefault();
+      return;
+    }
+  }
+
+  if (editing) return;
   if (event.key !== "Delete" && event.key !== "Backspace") return;
-  if (!selectedTask.value || isEditing(event.target)) return;
+  if (!selectedTask.value) return;
   planner.deleteTask(selectedTask.value.id);
 }
 
 function isEditing(target: EventTarget | null): boolean {
   const element = target as HTMLElement | null;
-  return element?.tagName === "INPUT" || element?.tagName === "TEXTAREA";
+  return element?.tagName === "INPUT" || element?.tagName === "TEXTAREA" || element?.isContentEditable === true;
+}
+
+function isPristineTaskName(target: EventTarget | null): boolean {
+  const element = target as HTMLInputElement | null;
+  return element?.dataset.role === "task-name" && element.value === selectedTask.value?.["std.name"];
 }
 
 onMounted(() => window.addEventListener("keydown", onKeydown));
@@ -114,8 +135,8 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
     </div>
 
     <p class="text-[11px] text-slate-400">
-      Click empty space to add. Drag a block to move it, drag its bottom edge to resize. Data lives in a UPL container
-      with UTC ISO times.
+      Double-click empty space to add. Drag an edge to push, Shift-drag to pull, Ctrl-drag to stretch, Alt-drag to
+      overlap. Drag a block to move it. Ctrl-Z undoes, Ctrl-Y redoes. Data lives in a UPL container with UTC ISO times.
     </p>
   </main>
 </template>
