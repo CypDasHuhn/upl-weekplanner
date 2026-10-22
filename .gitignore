@@ -1,0 +1,5 @@
+node_modules
+dist
+public/uniplanner-core.js
+*.local
+.DS_Store
