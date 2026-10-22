@@ -16,7 +16,7 @@ Vue 3 + TypeScript week planner built on the [UniPlanner](../uniplanner) protoco
 | `src/stores/`     | planner state, server sync, session state                             |
 | `src/components/` | week grid, task sidebar                                               |
 | `src/views/`      | login form                                                            |
-| `scripts/`        | sync the compiled UniPlanner JS API                                   |
+| `scripts/`        | sync the compiled UniPlanner JS API; import Day Planner Markdown      |
 | `.opencode/`      | architect, coder, reviewer, scribe roles                              |
 | `justfile`        | local command recipes                                                 |
 
@@ -67,19 +67,40 @@ The document is a UniPlanner container:
       "std.name": "Deep work",
       "std.time.start": "2026-04-01T09:00:00Z",
       "std.time.duration": "PT2H",
-      "std.status.closed": false
+      "std.status.closed": false,
+      "std.tags": ["work", "deep"]
     }
   ]
 }
 ```
 
 The weekplanner requests mutations as the `gantt` handler because gantt owns `std.time.*`. Times are stored in UTC; the grid
-renders local wall time. The server document is `01-personal/planner/2026-W43.upl.json`; the UI signs in with the planner
-token and syncs each applied request to the server. Imports replace the server document atomically. The browser still uses
+renders local wall time. The server document for the displayed week is `01-personal/planner/YYYY-Www.upl.json`; the UI signs
+in with the planner token and syncs each applied request to the server. Missing weeks are created on first edit. Imports
+replace the current week document atomically. The browser still uses
 the compiled Core for previews and undo replay, so dragging stays immediate.
+
+Tags are stored as a `std.tags` string array on each task. The top-bar tag-color settings choose the text and block colors;
+blocks with multiple tags use striped background colors. Colors are stored in `01-personal/planner/workspace.upl.json`
+under `std.tag.colors`, so they are shared across weeks and devices. The settings list unions tags from every week in the
+planner directory.
+
+## Import Day Planner Markdown
+
+`scripts/import-day-planner.ts` converts old Obsidian Day Planner notes named `YYYY-MM-DD.md` into one UPL container per
+ISO week:
+
+```sh
+npm run import:day-planner -- /path/to/daily /path/to/planner
+npm run import:day-planner -- /path/to/daily /path/to/planner --write
+```
+
+The default run is a dry run. `--write` creates missing week files and skips existing ones unless `--overwrite` is given.
+Wall-clock times use `--timezone` (default `Europe/Berlin`), tags become `std.tags`, and `[x]` entries become closed tasks.
+Use `--heading` for a different planner heading. `std.time.end` is left out because gantt derives it.
 
 ## Current scope
 
-Move blocks, double-click empty time to create, shared-edge Push/Pull/Stretch/Overlap, rename/close/delete, undo/redo, week navigation,
-server sync, login/logout, JSON import/export.
-Box selection and multi-block move are next.
+Move blocks, double-click empty time to create, Ctrl-click and drag-marquee selection, collective selection drag with
+overlap, Ctrl-C/Ctrl-X/Ctrl-V clipboard, shared-edge Push/Pull/Stretch/Overlap, rename/close/delete, tags and tag colors,
+undo/redo, week navigation, server sync, login/logout, JSON import/export.

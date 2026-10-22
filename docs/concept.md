@@ -9,6 +9,7 @@ One `.upl.json` container holds the week. The container has its own id and field
 - `std.time.start` — UTC ISO instant
 - `std.time.duration` — ISO 8601 duration
 - `std.status.closed` — boolean
+- `std.tags` — string array of tag names
 
 `std.time.end` is derived by the gantt handler and is never written by the planner. Time writes are requested as
 `gantt`, because gantt owns `std.time.*`.
@@ -16,6 +17,9 @@ One `.upl.json` container holds the week. The container has its own id and field
 ## Interaction
 
 - Double-clicking empty time creates a 60-minute task at the snapped pointer position and focuses its name field. Occupied time is ignored, even when a different lane leaves visible space.
+- Plain click selects one task. Ctrl-click adds a task to the selection. Dragging from empty grid space draws a rectangle; plain drag replaces the selection, Ctrl-drag adds every intersecting task.
+- Dragging any selected task moves the whole selection by the same day/time delta. Collisions overlap instead of pushing.
+- Ctrl-C copies the selection, Ctrl-X cuts it, and Ctrl-V pastes it into the displayed week at the same weekday and time. Pasted tasks become the selection.
 - Body drag moves a task in time and across day columns without changing duration.
 - Edges are shared boundaries. Plain drag pushes, Shift-drag pulls, Ctrl/Meta-drag stretches and Alt-drag overlaps.
 - Push reaches the next task across a gap and shrinks it from the far edge instead of overlapping.
@@ -25,7 +29,8 @@ One `.upl.json` container holds the week. The container has its own id and field
 - Ctrl-Z undoes the last action and Ctrl-Y or Ctrl-Shift-Z redoes it. While a task name is focused, the shortcuts still
   undo/redo the app until the name field has unsaved edits.
 - Snap and minimum duration are 15 minutes.
-- Lanes use a stable side order, persisted separately from the container; overlapping tasks split the non-gutter width and sides do not switch during a drag.
+- Lanes use a stable side order while the planner is open; overlapping tasks split the non-gutter width and sides do not switch during a drag.
+- Tags color block backgrounds and text. Multiple tags use striped backgrounds. Color choices live in the shared workspace document.
 - A rejected preview shows the not-allowed cursor and the drag commits nothing.
 
 ## History
