@@ -76,6 +76,6 @@ renders local wall time.
 
 ## Current scope
 
-Move blocks, resize from either edge, create on empty space, rename/close/delete, week navigation, localStorage autosave, JSON
-import/export.
-Push, pull, stretch, box selection and multi-block move are next.
+Move blocks, double-click empty time to create, shared-edge Push/Pull/Stretch/Overlap, rename/close/delete, undo/redo, week navigation,
+localStorage autosave, JSON import/export.
+Box selection and multi-block move are next.
