@@ -16,7 +16,7 @@ One `.upl.json` container holds the week. The container has its own id and field
 
 ## Interaction
 
-- Double-clicking empty time creates a 60-minute task at the snapped pointer position and focuses its name field. Occupied time is ignored, even when a different lane leaves visible space.
+- Double-clicking empty time creates a task at the previous quarter-hour and focuses its name field. It ends at the next task in the clicked lane, capped at 30 minutes. Occupied time in that lane is ignored.
 - Plain click selects one task. Ctrl-click adds a task to the selection. Dragging from empty grid space draws a rectangle; plain drag replaces the selection, Ctrl-drag adds every intersecting task.
 - Dragging any selected task moves the whole selection by the same day/time delta. Collisions overlap instead of pushing.
 - Ctrl-C copies the selection, Ctrl-X cuts it, and Ctrl-V pastes it into the displayed week at the same weekday and time. Pasted tasks become the selection.

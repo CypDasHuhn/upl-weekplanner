@@ -101,6 +101,6 @@ Use `--heading` for a different planner heading. `std.time.end` is left out beca
 
 ## Current scope
 
-Move blocks, double-click empty time to create, Ctrl-click and drag-marquee selection, collective selection drag with
+Move blocks, double-click empty time to create up to 30 minutes, Ctrl-click and drag-marquee selection, collective selection drag with
 overlap, Ctrl-C/Ctrl-X/Ctrl-V clipboard, shared-edge Push/Pull/Stretch/Overlap, rename/close/delete, tags and tag colors,
 undo/redo, week navigation, server sync, login/logout, JSON import/export.

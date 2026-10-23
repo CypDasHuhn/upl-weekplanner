@@ -16,7 +16,7 @@ through the authenticated UniPlanner server API. The compiled `js-api` Core stil
 feedback stays synchronous.
 
 Implemented: token login/logout, per-week server document load, server-side week creation, per-request server sync, import
-replacement, double-click to create, Ctrl-click and drag-marquee selection, collective selection drag with overlap,
+replacement, double-click to create up to 30 minutes in the clicked lane, Ctrl-click and drag-marquee selection, collective selection drag with overlap,
 Ctrl-C/Ctrl-X/Ctrl-V clipboard, move by dragging the body, shared-edge Push/Pull/Stretch/Overlap, rename, close, delete,
 tags with configurable text and block colors, dark mode, undo/redo, week navigation, import/export. Times are UTC ISO
 instants; durations are ISO 8601 strings. Tags
