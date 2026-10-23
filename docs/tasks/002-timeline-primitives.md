@@ -1,6 +1,6 @@
 ---
 name: Timeline primitives
-status: todo
+status: done
 depends-on: [001]
 reviewers: [correctness]
 ---
