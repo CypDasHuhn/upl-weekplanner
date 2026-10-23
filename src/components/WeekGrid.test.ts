@@ -1,5 +1,5 @@
 import { enableAutoUnmount, mount, type VueWrapper } from "@vue/test-utils";
-import { nextTick } from "vue";
+import { nextTick, ref } from "vue";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HOUR_PX, type PlanBlock } from "../core/time";
 import WeekGrid from "./WeekGrid.vue";
@@ -25,6 +25,7 @@ vi.mock("../stores/planner", () => ({ planner }));
 
 beforeEach(() => {
   vi.clearAllMocks();
+  planner.weekStart = ref(new Date(2026, 3, 1));
   planner.selectedIds.value = [];
   planner.select.mockImplementation((taskId: string | null) => {
     planner.selectedIds.value = taskId ? [taskId] : [];
@@ -359,5 +360,75 @@ describe("week grid interactions", () => {
 
     expect(planner.clearPreview).toHaveBeenCalled();
     expect(planner.applyEdge).not.toHaveBeenCalled();
+  });
+});
+
+describe("current time indicator", () => {
+  const today = new Date(2026, 3, 1, 9, 30, 0);
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(today);
+    planner.weekStart.value = new Date(2026, 3, 1);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    planner.weekStart.value = new Date(2026, 3, 1);
+  });
+
+  function expectTopAt(wrapper: VueWrapper, minutes: number): void {
+    const line = wrapper.get("[data-current-time]").element as HTMLElement;
+    expect(Number.parseFloat(line.style.top)).toBeCloseTo((minutes / 60) * HOUR_PX);
+  }
+
+  it("renders a pointer-transparent line in today's column", () => {
+    const wrapper = mountGrid([]);
+    const line = wrapper.get("[data-current-time]").element as HTMLElement;
+    const column = line.closest<HTMLElement>("[data-day-index]");
+
+    expect(column?.dataset.dayIndex).toBe("0");
+    expect(line.classList.contains("pointer-events-none")).toBe(true);
+    expectTopAt(wrapper, 9 * 60 + 30);
+  });
+
+  it("hides when today is not in the displayed week", () => {
+    planner.weekStart.value = new Date(2026, 3, 8);
+    const wrapper = mountGrid([]);
+
+    expect(wrapper.find("[data-current-time]").exists()).toBe(false);
+  });
+
+  it("advances after the clock crosses a minute", async () => {
+    const wrapper = mountGrid([]);
+    expectTopAt(wrapper, 9 * 60 + 30);
+
+    vi.advanceTimersByTime(60_000);
+    await nextTick();
+
+    expectTopAt(wrapper, 9 * 60 + 31);
+  });
+
+  it("refreshes the position on focus after timers were suspended", async () => {
+    const wrapper = mountGrid([]);
+    vi.setSystemTime(new Date(2026, 3, 1, 9, 45, 0));
+
+    window.dispatchEvent(new Event("focus"));
+    await nextTick();
+
+    expectTopAt(wrapper, 9 * 60 + 45);
+  });
+
+  it("reappears and refreshes the position after navigating back to today's week", async () => {
+    planner.weekStart.value = new Date(2026, 3, 8);
+    const wrapper = mountGrid([]);
+    expect(wrapper.find("[data-current-time]").exists()).toBe(false);
+
+    vi.setSystemTime(new Date(2026, 3, 1, 9, 45, 0));
+    planner.weekStart.value = new Date(2026, 3, 1);
+    await nextTick();
+
+    expect(wrapper.find("[data-current-time]").exists()).toBe(true);
+    expectTopAt(wrapper, 9 * 60 + 45);
   });
 });

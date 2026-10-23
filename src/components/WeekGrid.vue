@@ -1,15 +1,17 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { buildEdges, type EdgeMode, type PlanEdge } from "../core/edges";
 import { tagPaint } from "../core/tags";
 import {
   addDays,
   clamp,
+  dayIndexFor,
   formatClock,
   HOUR_PX,
   MIN_DURATION_MINUTES,
   MINUTES_PER_DAY,
   MINUTES_PER_HOUR,
+  minutesIntoDay,
   snap,
   snapDown,
   type PlanBlock,
@@ -26,6 +28,7 @@ const props = defineProps<{
 const dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const hours = Array.from({ length: 24 }, (_, hour) => hour);
 const MAX_NEW_TASK_MINUTES = 30;
+const CLOCK_REFRESH_MS = 60_000;
 const modeLabels: Record<EdgeMode, string> = {
   push: "Push",
   pull: "Pull",
@@ -41,8 +44,11 @@ const ctrlHeld = ref(false);
 const altHeld = ref(false);
 const metaHeld = ref(false);
 const dragMode = ref<EdgeMode | null>(null);
+const now = ref(new Date());
+let clockTimer: ReturnType<typeof setTimeout> | null = null;
 
 const days = computed(() => Array.from({ length: 7 }, (_, index) => addDays(planner.weekStart.value, index)));
+const todayIndex = computed(() => dayIndexFor(now.value, planner.weekStart.value));
 const edges = computed(() => buildEdges(props.blocks));
 const hoverMode = computed<EdgeMode>(() => {
   if (altHeld.value) return "overlap";
@@ -178,6 +184,12 @@ function columnStyle(): Record<string, string> {
     backgroundImage:
       "repeating-linear-gradient(to bottom, var(--grid-line) 0, var(--grid-line) 1px, transparent 1px, transparent 100%)",
     backgroundSize: `100% ${HOUR_PX}px`,
+  };
+}
+
+function currentTimeStyle(): Record<string, string> {
+  return {
+    top: `${(minutesIntoDay(now.value) / MINUTES_PER_HOUR) * HOUR_PX}px`,
   };
 }
 
@@ -401,17 +413,57 @@ function resetModifiers(): void {
   metaHeld.value = false;
 }
 
+function refreshNow(): void {
+  now.value = new Date();
+}
+
+function refreshClock(): void {
+  refreshNow();
+  if (clockTimer !== null) {
+    clearTimeout(clockTimer);
+    clockTimer = null;
+  }
+  scheduleClock();
+}
+
+function scheduleClock(): void {
+  clockTimer = setTimeout(() => {
+    refreshNow();
+    scheduleClock();
+  }, delayUntilNextMinute(now.value));
+}
+
+function onVisibilityChange(): void {
+  if (document.visibilityState === "visible") refreshClock();
+}
+
+function delayUntilNextMinute(date: Date): number {
+  const elapsed = date.getSeconds() * 1000 + date.getMilliseconds();
+  return CLOCK_REFRESH_MS - elapsed;
+}
+
+watch(() => planner.weekStart.value, refreshClock);
+
 onMounted(() => {
+  refreshClock();
   window.addEventListener("keydown", syncModifiers);
   window.addEventListener("keyup", syncModifiers);
   window.addEventListener("blur", resetModifiers);
+  window.addEventListener("focus", refreshClock);
+  document.addEventListener("visibilitychange", onVisibilityChange);
 });
 
 onBeforeUnmount(() => {
   finishDrag();
+  if (clockTimer !== null) {
+    clearTimeout(clockTimer);
+    clockTimer = null;
+  }
   window.removeEventListener("keydown", syncModifiers);
   window.removeEventListener("keyup", syncModifiers);
   window.removeEventListener("blur", resetModifiers);
+  window.removeEventListener("focus", refreshClock);
+  document.removeEventListener("visibilitychange", onVisibilityChange);
 });
 </script>
 
@@ -498,6 +550,16 @@ onBeforeUnmount(() => {
             >
               {{ modeLabels[shownMode] }}
             </span>
+          </div>
+
+          <div
+            v-if="dayIndex === todayIndex"
+            class="pointer-events-none absolute inset-x-0 z-30 -translate-y-1/2"
+            :style="currentTimeStyle()"
+            data-current-time
+            aria-hidden="true"
+          >
+            <div class="h-0.5 bg-rose-500 dark:bg-rose-400"></div>
           </div>
         </div>
       </div>
