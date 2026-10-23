@@ -8,6 +8,12 @@ Vue 3 + TypeScript week planner built on the [UniPlanner](../uniplanner) protoco
 - [docs/workflow.md](docs/workflow.md) — agent workflow
 - [STYLEGUIDE.md](STYLEGUIDE.md) — code rules
 
+## Human note
+
+This repos is vibe coded, although actively in use. Most of the interesting logic lives in the uniplanner project
+anyway, this here are just my prefered UX decisions built on top of that. This is the last human line you will read
+here.
+
 ## Layout
 
 | Path              | Responsibility                                                        |
@@ -28,8 +34,8 @@ npm run sync-core
 UPL_SERVER_URL=http://127.0.0.1:8090 npm run dev
 ```
 
-`sync-core` builds `uniplanner:js-api` and copies `uniplanner-core.js` into `public/`. `dev` and `build` run it first. The
-Vite dev server proxies `/api`, `/auth`, and `/health` to `UPL_SERVER_URL`.
+`sync-core` builds `uniplanner:js-api` and copies `uniplanner-core.js` into `public/`. `dev` and `build` run it first.
+The Vite dev server proxies `/api`, `/auth`, and `/health` to `UPL_SERVER_URL`.
 
 ## Just
 
@@ -42,7 +48,8 @@ just check
 just build
 ```
 
-`just verify` runs typecheck, tests, format check and the production build. `just clean` removes `dist/` and the copied core bundle.
+`just verify` runs typecheck, tests, format check and the production build. `just clean` removes `dist/` and the copied
+core bundle.
 
 ## Verify
 
@@ -74,16 +81,16 @@ The document is a UniPlanner container:
 }
 ```
 
-The weekplanner requests mutations as the `gantt` handler because gantt owns `std.time.*`. Times are stored in UTC; the grid
-renders local wall time. The server document for the displayed week is `01-personal/planner/YYYY-Www.upl.json`; the UI signs
-in with the planner token and syncs each applied request to the server. Missing weeks are created on first edit. Imports
-replace the current week document atomically. The browser still uses
-the compiled Core for previews and undo replay, so dragging stays immediate.
+The weekplanner requests mutations as the `gantt` handler because gantt owns `std.time.*`. Times are stored in UTC; the
+grid renders local wall time. The server document for the displayed week is `01-personal/planner/YYYY-Www.upl.json`; the
+UI signs in with the planner token and syncs each applied request to the server. Missing weeks are created on first
+edit. Imports replace the current week document atomically. The browser still uses the compiled Core for previews and
+undo replay, so dragging stays immediate.
 
-Tags are stored as a `std.tags` string array on each task. The top-bar tag-color settings choose the text and block colors;
-blocks with multiple tags use striped background colors. Colors are stored in `01-personal/planner/workspace.upl.json`
-under `std.tag.colors`, so they are shared across weeks and devices. The settings list unions tags from every week in the
-planner directory.
+Tags are stored as a `std.tags` string array on each task. The top-bar tag-color settings choose the text and block
+colors; blocks with multiple tags use striped background colors. Colors are stored in
+`01-personal/planner/workspace.upl.json` under `std.tag.colors`, so they are shared across weeks and devices. The
+settings list unions tags from every week in the planner directory.
 
 ## Import Day Planner Markdown
 
@@ -95,13 +102,13 @@ npm run import:day-planner -- /path/to/daily /path/to/planner
 npm run import:day-planner -- /path/to/daily /path/to/planner --write
 ```
 
-The default run is a dry run. `--write` creates missing week files and skips existing ones unless `--overwrite` is given.
-Wall-clock times use `--timezone` (default `Europe/Berlin`), tags become `std.tags`, and `[x]` entries become closed tasks.
-Use `--heading` for a different planner heading. `std.time.end` is left out because gantt derives it.
+The default run is a dry run. `--write` creates missing week files and skips existing ones unless `--overwrite` is
+given. Wall-clock times use `--timezone` (default `Europe/Berlin`), tags become `std.tags`, and `[x]` entries become
+closed tasks. Use `--heading` for a different planner heading. `std.time.end` is left out because gantt derives it.
 
 ## Current scope
 
-Move blocks, double-click empty time to create up to 30 minutes, Ctrl-click and drag-marquee selection, collective selection drag with
-overlap, Ctrl-C/Ctrl-X/Ctrl-V clipboard, shared-edge Push/Pull/Stretch/Overlap, rename/close/delete, tags and tag colors,
-read-only mutation history, current-time line, dark mode, undo/redo, week navigation, server sync, login/logout, JSON
-import/export.
+Move blocks, double-click empty time to create up to 30 minutes, Ctrl-click and drag-marquee selection, collective
+selection drag with overlap, Ctrl-C/Ctrl-X/Ctrl-V clipboard, shared-edge Push/Pull/Stretch/Overlap, rename/close/delete,
+tags and tag colors, read-only mutation history, current-time line, dark mode, undo/redo, week navigation, server sync,
+login/logout, JSON import/export.
