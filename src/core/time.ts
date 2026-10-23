@@ -63,6 +63,10 @@ export function snap(minutes: number): number {
   return Math.round(minutes / SNAP_MINUTES) * SNAP_MINUTES;
 }
 
+export function snapDown(minutes: number): number {
+  return Math.floor(minutes / SNAP_MINUTES) * SNAP_MINUTES;
+}
+
 export function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(Math.max(value, minimum), maximum);
 }

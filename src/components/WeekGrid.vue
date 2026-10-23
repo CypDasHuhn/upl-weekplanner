@@ -11,6 +11,7 @@ import {
   MINUTES_PER_DAY,
   MINUTES_PER_HOUR,
   snap,
+  snapDown,
   type PlanBlock,
 } from "../core/time";
 import { planner, type TaskMove } from "../stores/planner";
@@ -24,6 +25,7 @@ const props = defineProps<{
 
 const dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const hours = Array.from({ length: 24 }, (_, hour) => hour);
+const MAX_NEW_TASK_MINUTES = 30;
 const modeLabels: Record<EdgeMode, string> = {
   push: "Push",
   pull: "Pull",
@@ -184,12 +186,28 @@ function createAt(event: MouseEvent, dayIndex: number): void {
   const element = event.currentTarget as HTMLElement;
   const rect = element.getBoundingClientRect();
   const minutes = ((event.clientY - rect.top) / HOUR_PX) * MINUTES_PER_HOUR;
-  const start = clamp(snap(minutes), 0, MINUTES_PER_DAY - MIN_DURATION_MINUTES);
-  const occupied = blocksForDay(dayIndex).some(
-    (block) => start >= block.startMinutes && start < block.startMinutes + block.durationMinutes,
+  const start = clamp(snapDown(minutes), 0, MINUTES_PER_DAY - MIN_DURATION_MINUTES);
+  const blocks = blocksForDay(dayIndex);
+  const lane = laneAt(blocks, rect, event.clientX);
+  const occupied = blocks.some(
+    (block) => block.lane === lane && start >= block.startMinutes && start < block.startMinutes + block.durationMinutes,
   );
   if (occupied) return;
-  planner.createTask(dayIndex, start);
+
+  const next = blocks
+    .filter((block) => block.lane === lane && block.startMinutes > start)
+    .sort((left, right) => left.startMinutes - right.startMinutes)[0];
+  const gap = next ? next.startMinutes - start : MAX_NEW_TASK_MINUTES;
+  const duration = clamp(Math.min(MAX_NEW_TASK_MINUTES, gap), MIN_DURATION_MINUTES, MINUTES_PER_DAY - start);
+  planner.createTask(dayIndex, start, duration);
+}
+
+function laneAt(blocks: PlanBlock[], rect: DOMRect, clientX: number): number {
+  const laneCount = Math.max(1, ...blocks.map((block) => block.laneCount));
+  if (laneCount <= 1 || rect.width <= 0) return 0;
+  const ratio = clamp((clientX - rect.left) / rect.width, 0, 0.9);
+  const laneWidth = 0.9 / laneCount;
+  return clamp(Math.floor(ratio / laneWidth), 0, laneCount - 1);
 }
 
 function startMove(event: PointerEvent, block: PlanBlock): void {
@@ -400,7 +418,7 @@ onBeforeUnmount(() => {
 <template>
   <section
     ref="root"
-    class="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900"
+    class="flex h-full min-h-0 select-none flex-col overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900"
   >
     <div
       v-if="marqueeActive"
@@ -437,7 +455,7 @@ onBeforeUnmount(() => {
           class="relative bg-white dark:bg-slate-950"
           :data-day-index="dayIndex"
           :style="columnStyle()"
-          @pointerdown.self.prevent="startSelection($event)"
+          @pointerdown.self="startSelection($event)"
           @dblclick.self="createAt($event, dayIndex)"
         >
           <div

@@ -9,6 +9,7 @@ import {
   minutesIntoDay,
   parseIsoDuration,
   readBlocks,
+  snapDown,
   startOfWeek,
   type PlanBlock,
 } from "./time";
@@ -59,6 +60,12 @@ describe("week geometry", () => {
 
     expect(dayIndexFor(instant, week)).toBe(2);
     expect(minutesIntoDay(instant)).toBe(570);
+  });
+
+  it("floors a time to the previous quarter hour", () => {
+    expect(snapDown(9 * 60 + 7)).toBe(9 * 60);
+    expect(snapDown(9 * 60 + 14)).toBe(9 * 60);
+    expect(snapDown(9 * 60 + 15)).toBe(9 * 60 + 15);
   });
 
   it("formats clock values", () => {

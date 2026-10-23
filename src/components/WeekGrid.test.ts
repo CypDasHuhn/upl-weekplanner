@@ -75,10 +75,10 @@ function stubColumnAt(wrapper: VueWrapper, dayIndex: number): void {
   });
 }
 
-function pointerDown(element: Element, clientY: number, init: MouseEventInit = {}): void {
-  element.dispatchEvent(
-    new MouseEvent("pointerdown", { clientY, clientX: 20, bubbles: true, cancelable: true, ...init }),
-  );
+function pointerDown(element: Element, clientY: number, init: MouseEventInit = {}): MouseEvent {
+  const event = new MouseEvent("pointerdown", { clientY, clientX: 20, bubbles: true, cancelable: true, ...init });
+  element.dispatchEvent(event);
+  return event;
 }
 
 function pointerMove(clientY: number, clientX = 20): void {
@@ -104,7 +104,40 @@ describe("week grid interactions", () => {
     doubleClick(wrapper.get("[data-day-index='3']").element, 9 * HOUR_PX);
     await nextTick();
 
-    expect(planner.createTask).toHaveBeenCalledWith(3, 9 * 60);
+    expect(planner.createTask).toHaveBeenCalledWith(3, 9 * 60, 30);
+  });
+
+  it("creates a task from a real double-click pointer sequence", async () => {
+    const wrapper = mountGrid([]);
+    const column = wrapper.get("[data-day-index='3']").element;
+
+    const first = pointerDown(column, 9 * HOUR_PX);
+    pointerUp();
+    pointerDown(column, 9 * HOUR_PX, { detail: 2 });
+    pointerUp();
+    doubleClick(column, 9 * HOUR_PX);
+    await nextTick();
+
+    expect(first.defaultPrevented).toBe(false);
+    expect(planner.createTask).toHaveBeenCalledWith(3, 9 * 60, 30);
+  });
+
+  it("floors the start to the previous quarter hour", async () => {
+    const wrapper = mountGrid([]);
+
+    doubleClick(wrapper.get("[data-day-index='3']").element, 9 * HOUR_PX + 5);
+    await nextTick();
+
+    expect(planner.createTask).toHaveBeenCalledWith(3, 9 * 60, 30);
+  });
+
+  it("ends a new task at the next task in the same lane", async () => {
+    const wrapper = mountGrid([planBlock({ taskId: "b", title: "Beta", startMinutes: 9 * 60 + 15 })]);
+
+    doubleClick(wrapper.get("[data-day-index='0']").element, 9 * HOUR_PX + 5);
+    await nextTick();
+
+    expect(planner.createTask).toHaveBeenCalledWith(0, 9 * 60, 15);
   });
 
   it("does not create a task on a single click", async () => {
