@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import AuditHistoryPanel from "./components/AuditHistoryPanel.vue";
 import TagColorSettings from "./components/TagColorSettings.vue";
 import TaskSidebar from "./components/TaskSidebar.vue";
 import WeekGrid from "./components/WeekGrid.vue";
@@ -145,6 +146,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
         >
           {{ mode === "dark" ? "Light mode" : "Dark mode" }}
         </button>
+        <AuditHistoryPanel />
         <TagColorSettings />
         <button
           class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
