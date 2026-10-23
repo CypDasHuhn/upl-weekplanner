@@ -18,8 +18,8 @@ feedback stays synchronous.
 Implemented: token login/logout, per-week server document load, server-side week creation, per-request server sync, import
 replacement, double-click to create up to 30 minutes in the clicked lane, Ctrl-click and drag-marquee selection, collective selection drag with overlap,
 Ctrl-C/Ctrl-X/Ctrl-V clipboard, move by dragging the body, shared-edge Push/Pull/Stretch/Overlap, rename, close, delete,
-tags with configurable text and block colors, dark mode, undo/redo, week navigation, import/export. Times are UTC ISO
-instants; durations are ISO 8601 strings. Tags
+tags with configurable text and block colors, a read-only mutation-history drawer, a current-time line in today's column,
+dark mode, undo/redo, week navigation, import/export. Times are UTC ISO instants; durations are ISO 8601 strings. Tags
 live in task `std.tags` arrays; multiple tags stripe the block background. Tag colors are workspace data in
 `01-personal/planner/workspace.upl.json` (`std.tag.colors`), not browser-local. The settings list loads the tag union for
 the whole planner directory.

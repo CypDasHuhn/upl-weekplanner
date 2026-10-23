@@ -1,6 +1,6 @@
 ---
 name: Mutation history panel
-status: todo
+status: done
 depends-on: [002]
 reviewers: [correctness]
 ---

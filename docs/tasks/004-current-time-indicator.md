@@ -1,6 +1,6 @@
 ---
 name: Current time indicator
-status: todo
+status: done
 depends-on: []
 reviewers: [correctness]
 ---
